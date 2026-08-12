@@ -1,0 +1,70 @@
+import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+
+const model = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+
+export async function POST(request: Request) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+  if (profile?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return NextResponse.json({ error: "OpenAI is not configured on this environment." }, { status: 503 });
+
+  const body = await request.json().catch(() => null);
+  const image = typeof body?.image === "string" ? body.image : "";
+  const price = Number(body?.price);
+  const brand = typeof body?.brand === "string" && body.brand.trim() ? body.brand.trim() : "GJC";
+
+  if (!image.startsWith("data:image/") || image.length > 8_000_000) {
+    return NextResponse.json({ error: "Please provide a valid image under 6 MB." }, { status: 400 });
+  }
+  if (!Number.isFinite(price) || price < 0) {
+    return NextResponse.json({ error: "Please provide a valid INR price." }, { status: 400 });
+  }
+
+  const prompt = `You are the catalog assistant for Guruji Collections (GJC), an Indian clothing store. Analyze the supplied clothing product photo and return ONLY valid JSON with these keys: name, short_description, description, category, tags, seo_title, seo_description, suggested_sizes, suggested_colors, material, fit, care_instructions. Do not invent exact fabric composition if it cannot be seen; use cautious wording. Price is INR ${price}. Brand is ${brand}. Make the copy premium, concise and suitable for an Indian fashion storefront.`;
+
+  const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      input: [{ role: "user", content: [
+        { type: "input_text", text: prompt },
+        { type: "input_image", image_url: image, detail: "high" },
+      ] }],
+      max_output_tokens: 1200,
+    }),
+  });
+
+  if (!openaiResponse.ok) {
+    const errorText = await openaiResponse.text();
+    console.error("OpenAI catalog generation failed", errorText.slice(0, 1000));
+    return NextResponse.json({ error: "AI generation failed. Please try again." }, { status: 502 });
+  }
+
+  const payload = await openaiResponse.json();
+  const text = typeof payload.output_text === "string"
+    ? payload.output_text
+    : payload.output?.flatMap((item: any) => item.content || []).map((item: any) => item.text || "").join("\n") || "";
+
+  const cleaned = text.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
+  try {
+    const generated = JSON.parse(cleaned);
+    await supabase.from("ai_generation_jobs").insert({
+      user_id: user.id,
+      input_data: { price, brand },
+      output_data: generated,
+      status: "completed",
+      completed_at: new Date().toISOString(),
+    });
+    return NextResponse.json(generated);
+  } catch {
+    console.error("AI returned non-JSON catalog data", text.slice(0, 1000));
+    return NextResponse.json({ error: "AI returned an unexpected response. Please try again." }, { status: 502 });
+  }
+}
