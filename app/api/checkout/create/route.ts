@@ -40,7 +40,26 @@ export async function POST(request: Request) {
     if (itemError) throw itemError;
 
     const razorResponse = await fetch("https://api.razorpay.com/v1/orders", { method: "POST", headers: { Authorization: `Basic ${Buffer.from(`${razorpayKeyId}:${razorpaySecret}`).toString("base64")}`, "Content-Type": "application/json" }, body: JSON.stringify({ amount: Math.round(subtotal * 100), currency: "INR", receipt: number, notes: { gjc_order_id: order.id } }) });
-    if (!razorResponse.ok) { await service.from("orders").update({ status: "cancelled" }).eq("id", order.id); return NextResponse.json({ error: "Unable to create payment order" }, { status: 502 }); }
+
+    if (!razorResponse.ok) {
+      const raw = await razorResponse.text();
+      let details: any = null;
+      try { details = JSON.parse(raw); } catch { /* keep non-JSON response out of the client */ }
+      await service.from("orders").update({ status: "cancelled" }).eq("id", order.id);
+      console.error("GJC Razorpay order creation failed", {
+        status: razorResponse.status,
+        statusText: razorResponse.statusText,
+        error: details?.error ?? "non-json response",
+      });
+      return NextResponse.json({
+        error: "Unable to create payment order",
+        provider: "razorpay",
+        providerStatus: razorResponse.status,
+        providerCode: details?.error?.code ?? null,
+        providerReason: details?.error?.description ?? details?.error?.reason ?? null,
+      }, { status: 502 });
+    }
+
     const razorOrder = await razorResponse.json();
     const { error: paymentError } = await service.from("payments").insert({ order_id: order.id, provider: "razorpay", provider_order_id: razorOrder.id, status: "pending", amount: subtotal, currency: "INR" });
     if (paymentError) throw paymentError;
