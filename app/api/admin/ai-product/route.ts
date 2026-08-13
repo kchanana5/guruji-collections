@@ -26,10 +26,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Please provide a valid INR price." }, { status: 400 });
   }
 
-  const match = image.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s);
-  if (!match) return NextResponse.json({ error: "Invalid image data." }, { status: 400 });
-  const mimeType = match[1];
-  const base64Data = match[2];
+  // Avoid regex dotAll (/s) because the project's TypeScript target does not enable ES2018 regex flags.
+  const commaIndex = image.indexOf(",");
+  const header = commaIndex >= 0 ? image.slice(0, commaIndex) : "";
+  const base64Data = commaIndex >= 0 ? image.slice(commaIndex + 1) : "";
+  const mimeStart = "data:".length;
+  const mimeEnd = header.indexOf(";base64");
+  const mimeType = mimeEnd > mimeStart ? header.slice(mimeStart, mimeEnd) : "";
+
+  if (!mimeType.startsWith("image/") || !base64Data) {
+    return NextResponse.json({ error: "Invalid image data." }, { status: 400 });
+  }
 
   const prompt = `You are the catalog assistant for Guruji Collections (GJC), an Indian clothing store.
 First classify the supplied image. It must clearly show a sellable fashion/clothing product such as a shirt, t-shirt, top, dress, saree, kurta, jeans, trousers, jacket, coat, ethnic wear, footwear, handbag, or another clearly identifiable fashion item.
@@ -67,15 +74,14 @@ Set is_fashion_product to true. Do not invent exact fabric composition if it can
   if (!geminiResponse.ok) {
     const raw = await geminiResponse.text();
     let providerMessage = "The AI provider rejected the request.";
-    let providerStatus = geminiResponse.status;
     try {
       const parsed = JSON.parse(raw);
       providerMessage = typeof parsed?.error?.message === "string" ? parsed.error.message : providerMessage;
     } catch {
       // Keep the safe generic provider message if the response is not JSON.
     }
-    console.error("Gemini catalog generation failed", { status: providerStatus, message: providerMessage });
-    return NextResponse.json({ error: `AI provider error (${providerStatus}): ${providerMessage}`, code: "GEMINI_PROVIDER_ERROR" }, { status: 502 });
+    console.error("Gemini catalog generation failed", { status: geminiResponse.status, message: providerMessage });
+    return NextResponse.json({ error: `AI provider error (${geminiResponse.status}): ${providerMessage}`, code: "GEMINI_PROVIDER_ERROR" }, { status: 502 });
   }
 
   const payload = await geminiResponse.json();
