@@ -34,7 +34,6 @@ export async function GET(request: Request) {
     return NextResponse.redirect(new URL("/checkout?error=order-not-found", url));
   }
 
-  // A signed payment should only be usable by the customer who created the order.
   if (order.user_id && userData.user?.id && order.user_id !== userData.user.id) {
     return NextResponse.redirect(new URL("/checkout?error=order-access-denied", url));
   }
@@ -46,7 +45,7 @@ export async function GET(request: Request) {
     .eq("provider", "razorpay")
     .single();
 
-  if (paymentLookupError || !payment || payment.provider_order_id == null) {
+  if (paymentLookupError || !payment || !payment.provider_order_id) {
     return NextResponse.redirect(new URL("/checkout?error=payment-record-not-found", url));
   }
 
@@ -54,8 +53,10 @@ export async function GET(request: Request) {
     .createHmac("sha256", razorpaySecret)
     .update(`${payment.provider_order_id}|${paymentId}`)
     .digest("hex");
+  const expected = Buffer.from(expectedSignature, "utf8");
+  const received = Buffer.from(signature, "utf8");
 
-  if (!crypto.timingSafeEqual(Buffer.from(expectedSignature), Buffer.from(signature))) {
+  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
     await service.from("payments").update({ status: "failed", provider_payment_id: paymentId }).eq("id", payment.id);
     return NextResponse.redirect(new URL(`/checkout?error=payment-signature-invalid&order=${encodeURIComponent(orderId)}`, url));
   }
@@ -81,8 +82,9 @@ export async function GET(request: Request) {
 
   const { error: inventoryError } = await service.rpc("deduct_order_inventory", { p_order_id: orderId });
   if (inventoryError) {
-    await service.from("payments").update({ status: "failed" }).eq("id", payment.id);
-    console.error("GJC inventory deduction", inventoryError);
+    // The payment was successful; do not mark it failed because stock reconciliation
+    // is a separate concern that must be handled/refunded by the order workflow.
+    console.error("GJC inventory deduction after successful payment", inventoryError);
     return NextResponse.redirect(new URL(`/checkout?error=inventory-unavailable&order=${encodeURIComponent(orderId)}`, url));
   }
 
