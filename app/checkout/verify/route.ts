@@ -9,84 +9,54 @@ export async function GET(request: Request) {
   const paymentId = url.searchParams.get("payment");
   const signature = url.searchParams.get("signature");
 
-  if (!orderId || !paymentId || !signature) {
-    return NextResponse.redirect(new URL("/checkout?error=missing-payment-details", url));
-  }
+  if (!orderId || !paymentId || !signature) return NextResponse.redirect(new URL("/checkout/failed?reason=verification", url));
 
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const razorpaySecret = process.env.RAZORPAY_KEY_SECRET;
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!serviceKey || !razorpaySecret || !supabaseUrl) {
-    return NextResponse.redirect(new URL("/checkout?error=payment-verification-not-configured", url));
-  }
+  const razorpayKeyId = process.env.RAZORPAY_KEY_ID;
+  if (!serviceKey || !razorpaySecret || !supabaseUrl || !razorpayKeyId) return NextResponse.redirect(new URL("/checkout/failed?reason=configuration", url));
 
   const service = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
   const appClient = await createServerClient();
   const { data: userData } = await appClient.auth.getUser();
+  const { data: order } = await service.from("orders").select("id,order_number,user_id,grand_total,status").eq("id", orderId).single();
+  if (!order) return NextResponse.redirect(new URL("/checkout/failed?reason=order", url));
+  if (order.user_id && userData.user?.id && order.user_id !== userData.user.id) return NextResponse.redirect(new URL("/checkout/failed?reason=order", url));
 
-  const { data: order, error: orderError } = await service
-    .from("orders")
-    .select("id,order_number,user_id,grand_total,status")
-    .eq("id", orderId)
-    .single();
+  const { data: payment } = await service.from("payments").select("id,provider_order_id,amount,status").eq("order_id", orderId).eq("provider", "razorpay").single();
+  if (!payment?.provider_order_id) return NextResponse.redirect(new URL("/checkout/failed?reason=order", url));
 
-  if (orderError || !order) {
-    return NextResponse.redirect(new URL("/checkout?error=order-not-found", url));
-  }
-
-  if (order.user_id && userData.user?.id && order.user_id !== userData.user.id) {
-    return NextResponse.redirect(new URL("/checkout?error=order-access-denied", url));
-  }
-
-  const { data: payment, error: paymentLookupError } = await service
-    .from("payments")
-    .select("id,provider_order_id,amount,status")
-    .eq("order_id", orderId)
-    .eq("provider", "razorpay")
-    .single();
-
-  if (paymentLookupError || !payment || !payment.provider_order_id) {
-    return NextResponse.redirect(new URL("/checkout?error=payment-record-not-found", url));
-  }
-
-  const expectedSignature = crypto
-    .createHmac("sha256", razorpaySecret)
-    .update(`${payment.provider_order_id}|${paymentId}`)
-    .digest("hex");
+  const expectedSignature = crypto.createHmac("sha256", razorpaySecret).update(`${payment.provider_order_id}|${paymentId}`).digest("hex");
   const expected = Buffer.from(expectedSignature, "utf8");
   const received = Buffer.from(signature, "utf8");
+  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) return NextResponse.redirect(new URL("/checkout/failed?reason=signature", url));
+  if (Number(payment.amount) !== Number(order.grand_total)) return NextResponse.redirect(new URL("/checkout/failed?reason=payment", url));
 
-  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
-    await service.from("payments").update({ status: "failed", provider_payment_id: paymentId }).eq("id", payment.id);
-    return NextResponse.redirect(new URL(`/checkout?error=payment-signature-invalid&order=${encodeURIComponent(orderId)}`, url));
-  }
+  try {
+    const razorResponse = await fetch(`https://api.razorpay.com/v1/payments/${encodeURIComponent(paymentId)}`, {
+      headers: { Authorization: `Basic ${Buffer.from(`${razorpayKeyId}:${razorpaySecret}`).toString("base64")}` },
+      cache: "no-store",
+    });
+    if (!razorResponse.ok) return NextResponse.redirect(new URL("/checkout/failed?reason=payment", url));
+    const razorPayment = await razorResponse.json();
+    if (razorPayment.order_id !== payment.provider_order_id || Number(razorPayment.amount) !== Math.round(Number(payment.amount) * 100) || !["authorized", "captured"].includes(razorPayment.status)) {
+      return NextResponse.redirect(new URL("/checkout/failed?reason=payment", url));
+    }
 
-  if (Number(payment.amount) !== Number(order.grand_total)) {
-    await service.from("payments").update({ status: "failed", provider_payment_id: paymentId }).eq("id", payment.id);
-    return NextResponse.redirect(new URL(`/checkout?error=payment-amount-mismatch&order=${encodeURIComponent(orderId)}`, url));
-  }
+    const { error: inventoryError } = await service.rpc("deduct_order_inventory", { p_order_id: orderId });
+    if (inventoryError) {
+      console.error("GJC inventory deduction", inventoryError);
+      return NextResponse.redirect(new URL("/checkout/failed?reason=stock", url));
+    }
 
-  if (["confirmed", "processing", "shipped", "delivered"].includes(order.status)) {
+    const { error: paymentError } = await service.from("payments").update({ status: "paid", provider_payment_id: paymentId, raw_response: razorPayment, updated_at: new Date().toISOString() }).eq("id", payment.id);
+    if (paymentError) throw paymentError;
+    await service.from("orders").update({ status: "confirmed", updated_at: new Date().toISOString() }).eq("id", orderId);
+
     return NextResponse.redirect(new URL(`/checkout/success?order=${encodeURIComponent(order.order_number)}`, url));
+  } catch (error) {
+    console.error("GJC checkout verification", error);
+    return NextResponse.redirect(new URL("/checkout/failed?reason=verification", url));
   }
-
-  const { error: paymentError } = await service
-    .from("payments")
-    .update({ status: "paid", provider_payment_id: paymentId })
-    .eq("id", payment.id);
-
-  if (paymentError) {
-    console.error("GJC payment update", paymentError);
-    return NextResponse.redirect(new URL("/checkout?error=payment-update-failed", url));
-  }
-
-  const { error: inventoryError } = await service.rpc("deduct_order_inventory", { p_order_id: orderId });
-  if (inventoryError) {
-    // The payment was successful; do not mark it failed because stock reconciliation
-    // is a separate concern that must be handled/refunded by the order workflow.
-    console.error("GJC inventory deduction after successful payment", inventoryError);
-    return NextResponse.redirect(new URL(`/checkout?error=inventory-unavailable&order=${encodeURIComponent(orderId)}`, url));
-  }
-
-  return NextResponse.redirect(new URL(`/checkout/success?order=${encodeURIComponent(order.order_number)}`, url));
 }
