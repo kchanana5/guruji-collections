@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
 
 type Variant = {
   size: string;
@@ -11,25 +10,48 @@ type Variant = {
   price: string;
 };
 
+type Draft = {
+  name?: string;
+  short_description?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  seo_title?: string;
+  seo_description?: string;
+  material?: string;
+  fit?: string;
+  suggested_sizes?: string[];
+  suggested_colors?: string[];
+  care_instructions?: string;
+  [key: string]: unknown;
+};
+
 export default function AIProductForm() {
   const [image, setImage] = useState<File | null>(null);
   const [preview, setPreview] = useState("");
   const [price, setPrice] = useState("");
   const [brand, setBrand] = useState("GJC");
   const [loading, setLoading] = useState(false);
+  const [action, setAction] = useState<"generate" | "draft" | "publish" | "">("");
   const [message, setMessage] = useState("");
-  const [result, setResult] = useState<any>(null);
+  const [messageType, setMessageType] = useState<"info" | "success" | "error">("info");
+  const [result, setResult] = useState<Draft | null>(null);
   const [variants, setVariants] = useState<Variant[]>([]);
 
   const canGenerate = Boolean(image && Number(price) >= 0 && price !== "");
   const tags = useMemo(() => Array.isArray(result?.tags) ? result.tags : [], [result]);
 
+  function setNotice(text: string, type: "info" | "success" | "error" = "info") {
+    setMessage(text);
+    setMessageType(type);
+  }
+
   function onImageChange(file?: File) {
     if (!file) return;
-    if (!file.type.startsWith("image/")) return setMessage("Please choose an image file.");
-    if (file.size > 6 * 1024 * 1024) return setMessage("Please choose an image smaller than 6 MB.");
+    if (!file.type.startsWith("image/")) return setNotice("Please choose an image file.", "error");
+    if (file.size > 6 * 1024 * 1024) return setNotice("Please choose an image smaller than 6 MB.", "error");
     setImage(file);
-    setMessage("");
+    setNotice("");
     setResult(null);
     setVariants([]);
     const reader = new FileReader();
@@ -38,7 +60,13 @@ export default function AIProductForm() {
   }
 
   function addVariant() {
-    setVariants((current) => [...current, { size: "", color: "", sku: `GJC-${Date.now()}-${current.length + 1}`, stock_quantity: 0, price }]);
+    setVariants((current) => [...current, {
+      size: "",
+      color: "",
+      sku: `GJC-${Date.now()}-${current.length + 1}`,
+      stock_quantity: 0,
+      price,
+    }]);
   }
 
   function updateVariant(index: number, field: keyof Variant, value: string | number) {
@@ -53,7 +81,7 @@ export default function AIProductForm() {
     const sizes = Array.isArray(result?.suggested_sizes) ? result.suggested_sizes : [];
     const colors = Array.isArray(result?.suggested_colors) ? result.suggested_colors : [];
     const firstColor = colors[0] || "";
-    const next = sizes.map((size: string, index: number) => ({
+    const next = sizes.map((size, index) => ({
       size,
       color: firstColor,
       sku: `GJC-${Date.now()}-${index + 1}`,
@@ -61,12 +89,14 @@ export default function AIProductForm() {
       price,
     }));
     setVariants(next.length ? next : [{ size: "", color: firstColor, sku: `GJC-${Date.now()}-1`, stock_quantity: 0, price }]);
+    setNotice("AI variant suggestions added. Set the stock for the combinations you actually sell.", "success");
   }
 
   async function generate() {
     if (!image || !canGenerate) return;
     setLoading(true);
-    setMessage("");
+    setAction("generate");
+    setNotice("");
     try {
       const dataUrl = preview || await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
@@ -82,77 +112,56 @@ export default function AIProductForm() {
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Generation failed");
       setResult(data);
-      setMessage("AI draft generated. Review it before saving or publishing.");
+      setNotice("AI draft generated. Review it before saving or publishing.", "success");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Generation failed.");
+      setNotice(error instanceof Error ? error.message : "Generation failed.", "error");
     } finally {
       setLoading(false);
+      setAction("");
     }
   }
 
   async function saveProduct(publish: boolean) {
     if (!result) return;
     if (publish) {
-      if (!image) return setMessage("A product image is required before publishing.");
-      if (!variants.length) return setMessage("Add at least one size/colour variant before publishing.");
+      if (!image) return setNotice("A product image is required before publishing.", "error");
+      if (!variants.length) return setNotice("Add at least one size/colour variant before publishing.", "error");
       const invalid = variants.find((variant) => !variant.sku.trim() || !variant.size.trim() || !variant.color.trim() || variant.stock_quantity < 0);
-      if (invalid) return setMessage("Every variant needs a size, colour, SKU and valid stock quantity.");
-      if (!variants.some((variant) => variant.stock_quantity > 0)) return setMessage("Add stock to at least one variant before publishing.");
+      if (invalid) return setNotice("Every variant needs a size, colour, SKU and valid stock quantity.", "error");
+      if (!variants.some((variant) => variant.stock_quantity > 0)) return setNotice("Add stock to at least one variant before publishing.", "error");
+    }
+
+    const duplicateSkus = new Set<string>();
+    for (const variant of variants) {
+      const sku = variant.sku.trim();
+      if (duplicateSkus.has(sku)) return setNotice(`Duplicate SKU: ${sku}`, "error");
+      duplicateSkus.add(sku);
     }
 
     setLoading(true);
-    setMessage("");
+    setAction(publish ? "publish" : "draft");
+    setNotice("");
+
     try {
-      const supabase = createClient();
-      const slug = `${String(result.name || "gjc-product").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}-${Date.now()}`;
-      const { data: product, error } = await supabase.from("products").insert({
-        name: result.name,
-        slug,
-        base_price: Number(price),
-        brand,
-        short_description: result.short_description || null,
-        description: result.description || null,
-        seo_title: result.seo_title || null,
-        seo_description: result.seo_description || null,
-        tags,
-        ai_generated: true,
-        ai_generation_notes: result,
-        status: publish ? "active" : "draft",
-      }).select("id,slug").single();
-      if (error || !product) throw new Error(error?.message || "Could not save product.");
+      const form = new FormData();
+      form.set("draft", JSON.stringify({ ...result, variants }));
+      form.set("price", String(Number(price)));
+      form.set("brand", brand.trim() || "GJC");
+      form.set("publish", String(publish));
+      if (image) form.set("image", image);
 
-      const duplicateSkus = new Set<string>();
-      if (variants.length) {
-        for (const variant of variants) {
-          const sku = variant.sku.trim();
-          if (duplicateSkus.has(sku)) throw new Error(`Duplicate SKU: ${sku}`);
-          duplicateSkus.add(sku);
-        }
-        const { error: variantError } = await supabase.from("product_variants").insert(variants.map((variant) => ({
-          product_id: product.id,
-          sku: variant.sku.trim(),
-          size: variant.size.trim(),
-          color: variant.color.trim(),
-          price: variant.price === "" ? null : Number(variant.price),
-          stock_quantity: Number(variant.stock_quantity),
-          is_active: true,
-        })));
-        if (variantError) throw new Error(variantError.message);
-      }
+      const response = await fetch("/api/admin/products", { method: "POST", body: form });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not save product.");
 
-      if (image) {
-        const safeName = image.name.toLowerCase().replace(/[^a-z0-9.]+/g, "-");
-        const path = `${product.id}/${Date.now()}-${safeName}`;
-        const upload = await supabase.storage.from("product-images").upload(path, image, { contentType: image.type, upsert: false });
-        if (upload.error) throw new Error(upload.error.message);
-        const imageInsert = await supabase.from("product_images").insert({ product_id: product.id, storage_path: path, alt_text: result.name || "GJC product" });
-        if (imageInsert.error) throw new Error(imageInsert.error.message);
-      }
-
-      window.location.href = publish ? `/shop/${product.slug}` : "/admin";
+      setNotice(publish ? "Product published successfully. Opening the product…" : "Product saved as a draft successfully. Opening admin…", "success");
+      window.setTimeout(() => {
+        window.location.href = publish ? `/shop/${data.slug}` : "/admin";
+      }, 500);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Could not save product.");
+      setNotice(error instanceof Error ? error.message : "Could not save product.", "error");
       setLoading(false);
+      setAction("");
     }
   }
 
@@ -171,12 +180,12 @@ export default function AIProductForm() {
               <label><span className="mb-2 block text-sm font-semibold">Price (INR)</span><input value={price} onChange={(e) => setPrice(e.target.value)} type="number" min="0" step="0.01" placeholder="1499" className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 outline-none focus:border-[#8a6a35]" /></label>
               <label className="sm:col-span-2"><span className="mb-2 block text-sm font-semibold">Brand</span><input value={brand} onChange={(e) => setBrand(e.target.value)} className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 outline-none focus:border-[#8a6a35]" /></label>
             </div>
-            <button type="button" onClick={generate} disabled={!canGenerate || loading} className="mt-5 rounded-xl bg-[#171717] px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{loading ? "Generating…" : "Generate with AI"}</button>
+            <button type="button" onClick={generate} disabled={!canGenerate || loading} className="mt-5 rounded-xl bg-[#171717] px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{action === "generate" ? "Generating…" : "Generate with AI"}</button>
           </div>
         </div>
       </div>
 
-      {message && <p className="rounded-xl bg-[#f7f3ec] px-4 py-3 text-sm text-black/65">{message}</p>}
+      {message && <p className={`rounded-xl px-4 py-3 text-sm ${messageType === "error" ? "bg-red-50 text-red-700" : messageType === "success" ? "bg-green-50 text-green-700" : "bg-[#f7f3ec] text-black/65"}`}>{message}</p>}
 
       {result && <section className="rounded-2xl border border-black/10 bg-white p-6">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.25em] text-[#8a6a35]">AI DRAFT</p><h2 className="mt-1 text-2xl font-black">Review before saving</h2></div><span className="rounded-full bg-[#f7f3ec] px-3 py-1 text-xs font-bold">GJC AI</span></div>
@@ -188,21 +197,21 @@ export default function AIProductForm() {
           <div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Fit</p><p className="mt-1">{result.fit || "—"}</p></div>
           <div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Suggested sizes</p><p className="mt-1">{Array.isArray(result.suggested_sizes) ? result.suggested_sizes.join(", ") : "—"}</p></div>
           <div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Suggested colours</p><p className="mt-1">{Array.isArray(result.suggested_colors) ? result.suggested_colors.join(", ") : "—"}</p></div>
-          <div className="sm:col-span-2"><p className="text-xs font-bold uppercase tracking-wider text-black/40">Tags</p><div className="mt-2 flex flex-wrap gap-2">{tags.map((tag: string) => <span key={tag} className="rounded-full bg-[#f7f3ec] px-3 py-1 text-xs font-semibold">{tag}</span>)}</div></div>
+          <div className="sm:col-span-2"><p className="text-xs font-bold uppercase tracking-wider text-black/40">Tags</p><div className="mt-2 flex flex-wrap gap-2">{tags.map((tag) => <span key={tag} className="rounded-full bg-[#f7f3ec] px-3 py-1 text-xs font-semibold">{tag}</span>)}</div></div>
         </div>
 
         <div className="mt-8 border-t border-black/10 pt-7">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <div><p className="text-xs font-bold uppercase tracking-[0.25em] text-[#8a6a35]">OWNER REVIEW</p><h3 className="mt-1 text-xl font-black">Size, colour & inventory</h3><p className="mt-1 text-sm text-black/50">AI only suggests. Add the combinations you actually sell and set their stock. Publishing requires at least one in-stock variant.</p></div>
-            <div className="flex gap-2"><button type="button" onClick={seedSuggestedVariants} className="rounded-xl border border-black/10 px-4 py-2.5 text-xs font-bold hover:bg-black/[0.03]">Use AI suggestions</button><button type="button" onClick={addVariant} className="rounded-xl bg-[#171717] px-4 py-2.5 text-xs font-bold text-white">+ Add variant</button></div>
+            <div className="flex gap-2"><button type="button" onClick={seedSuggestedVariants} disabled={loading} className="rounded-xl border border-black/10 px-4 py-2.5 text-xs font-bold hover:bg-black/[0.03] disabled:opacity-50">Use AI suggestions</button><button type="button" onClick={addVariant} disabled={loading} className="rounded-xl bg-[#171717] px-4 py-2.5 text-xs font-bold text-white disabled:opacity-50">+ Add variant</button></div>
           </div>
 
-          {variants.length === 0 ? <div className="mt-5 rounded-xl bg-[#faf9f6] px-4 py-6 text-center text-sm text-black/45">No variants added yet. For clothing, add at least one real size/colour combination before publishing.</div> : <div className="mt-5 space-y-3">{variants.map((variant, index) => <div key={`${variant.sku}-${index}`} className="rounded-xl border border-black/10 bg-[#faf9f6] p-4"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><label><span className="mb-1 block text-xs font-semibold text-black/50">Size</span><input value={variant.size} onChange={(e) => updateVariant(index, "size", e.target.value)} placeholder="M" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Colour</span><input value={variant.color} onChange={(e) => updateVariant(index, "color", e.target.value)} placeholder="Black" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">SKU</span><input value={variant.sku} onChange={(e) => updateVariant(index, "sku", e.target.value)} className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Stock</span><input value={variant.stock_quantity} onChange={(e) => updateVariant(index, "stock_quantity", Math.max(0, Number(e.target.value)))} type="number" min="0" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Variant price</span><input value={variant.price} onChange={(e) => updateVariant(index, "price", e.target.value)} type="number" min="0" step="0.01" placeholder={price || "1499"} className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label></div><button type="button" onClick={() => removeVariant(index)} className="mt-3 text-xs font-semibold text-red-600 hover:underline">Remove variant</button></div>)}</div>}
+          {variants.length === 0 ? <div className="mt-5 rounded-xl bg-[#faf9f6] px-4 py-6 text-center text-sm text-black/45">No variants added yet. For clothing, add at least one real size/colour combination before publishing.</div> : <div className="mt-5 space-y-3">{variants.map((variant, index) => <div key={`${variant.sku}-${index}`} className="rounded-xl border border-black/10 bg-[#faf9f6] p-4"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><label><span className="mb-1 block text-xs font-semibold text-black/50">Size</span><input value={variant.size} onChange={(e) => updateVariant(index, "size", e.target.value)} placeholder="M" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Colour</span><input value={variant.color} onChange={(e) => updateVariant(index, "color", e.target.value)} placeholder="Black" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">SKU</span><input value={variant.sku} onChange={(e) => updateVariant(index, "sku", e.target.value)} className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Stock</span><input value={variant.stock_quantity} onChange={(e) => updateVariant(index, "stock_quantity", Math.max(0, Number(e.target.value)))} type="number" min="0" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Variant price</span><input value={variant.price} onChange={(e) => updateVariant(index, "price", e.target.value)} type="number" min="0" step="0.01" placeholder={price || "1499"} className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label></div><button type="button" onClick={() => removeVariant(index)} disabled={loading} className="mt-3 text-xs font-semibold text-red-600 hover:underline disabled:opacity-50">Remove variant</button></div>)}</div>}
         </div>
 
         <div className="mt-7 grid gap-3 sm:grid-cols-2">
-          <button type="button" onClick={() => saveProduct(false)} disabled={loading} className="rounded-xl border border-black/15 bg-white px-5 py-3.5 text-sm font-bold disabled:opacity-50">{loading ? "Saving…" : "Save as draft"}</button>
-          <button type="button" onClick={() => saveProduct(true)} disabled={loading} className="rounded-xl bg-[#171717] px-5 py-3.5 text-sm font-bold text-white disabled:opacity-50">{loading ? "Publishing…" : "Publish product"}</button>
+          <button type="button" onClick={() => saveProduct(false)} disabled={loading} className="rounded-xl border border-black/15 bg-white px-5 py-3.5 text-sm font-bold disabled:opacity-50">{action === "draft" ? "Saving draft…" : "Save as draft"}</button>
+          <button type="button" onClick={() => saveProduct(true)} disabled={loading} className="rounded-xl bg-[#171717] px-5 py-3.5 text-sm font-bold text-white disabled:opacity-50">{action === "publish" ? "Publishing…" : "Publish product"}</button>
         </div>
       </section>}
     </div>
