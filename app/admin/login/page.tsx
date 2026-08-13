@@ -24,8 +24,20 @@ export default function AdminLoginPage() {
       return;
     }
 
-    const { data } = await supabase.from("profiles").select("role").single();
-    if (data?.role !== "admin") {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setError("We could not verify the signed-in account.");
+      setLoading(false);
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("role")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (profileError || profile?.role !== "admin") {
       await supabase.auth.signOut();
       setError("This account is not authorized for the GJC admin panel.");
       setLoading(false);
