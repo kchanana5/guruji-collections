@@ -2,7 +2,7 @@ name: GJC CI
 
 on:
   push:
-    branches: ["main", "feature/admin-auth"]
+    branches: ["main", "feature/storefront-catalog", "feature/admin-auth"]
   pull_request:
     branches: ["main"]
 
@@ -17,9 +17,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Typecheck
         run: npm run typecheck
