@@ -26,7 +26,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Please provide a valid INR price." }, { status: 400 });
   }
 
-  const prompt = `You are the catalog assistant for Guruji Collections (GJC), an Indian clothing store. Analyze the supplied clothing product photo and return ONLY valid JSON with these keys: name, short_description, description, category, tags, seo_title, seo_description, suggested_sizes, suggested_colors, material, fit, care_instructions. Do not invent exact fabric composition if it cannot be seen; use cautious wording. Price is INR ${price}. Brand is ${brand}. Make the copy premium, concise and suitable for an Indian fashion storefront.`;
+  const prompt = `You are the catalog assistant for Guruji Collections (GJC), an Indian clothing store.
+First classify the supplied image. It must clearly show a sellable fashion/clothing product such as a shirt, t-shirt, top, dress, saree, kurta, jeans, trousers, jacket, coat, ethnic wear, footwear, handbag, or another clearly identifiable fashion item.
+If it is not a fashion product, return ONLY valid JSON in this exact shape: {"is_fashion_product":false,"rejection_reason":"This image does not appear to show a clothing or fashion product. Please upload a clear product photo."}.
+If it is a fashion product, return ONLY valid JSON with these keys: is_fashion_product, name, short_description, description, category, tags, seo_title, seo_description, suggested_sizes, suggested_colors, material, fit, care_instructions. Set is_fashion_product to true. Do not invent exact fabric composition if it cannot be seen; use cautious wording. Price is INR ${price}. Brand is ${brand}. Make the copy premium, concise and suitable for an Indian fashion storefront.`;
 
   const openaiResponse = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
@@ -55,6 +58,15 @@ export async function POST(request: Request) {
   const cleaned = text.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
   try {
     const generated = JSON.parse(cleaned);
+    if (generated?.is_fashion_product === false) {
+      return NextResponse.json({
+        error: generated.rejection_reason || "This image does not appear to show a clothing or fashion product. Please upload a clear product photo.",
+        code: "NOT_FASHION_PRODUCT",
+      }, { status: 422 });
+    }
+    if (generated?.is_fashion_product !== true) {
+      return NextResponse.json({ error: "AI could not confirm that this is a fashion product. Please upload a clearer clothing product photo.", code: "UNCERTAIN_PRODUCT" }, { status: 422 });
+    }
     await supabase.from("ai_generation_jobs").insert({
       user_id: user.id,
       input_data: { price, brand },
