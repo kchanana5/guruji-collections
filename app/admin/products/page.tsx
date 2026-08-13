@@ -1,24 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-
-async function updateStatus(formData: FormData) {
-  "use server";
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) redirect("/admin/login");
-  const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  if (profile?.role !== "admin") redirect("/");
-
-  const id = String(formData.get("id") || "");
-  const status = String(formData.get("status") || "draft");
-  if (!id || !["draft", "active", "archived"].includes(status)) return;
-  const { error } = await supabase.from("products").update({ status: status as "draft" | "active" | "archived" }).eq("id", id);
-  if (error) throw new Error(error.message);
-  revalidatePath("/admin");
-  revalidatePath("/admin/products");
-}
+import ProductStatusControl from "./status-control";
 
 export default async function ProductsPage() {
   const supabase = await createClient();
@@ -67,14 +50,11 @@ export default async function ProductsPage() {
                       </div>
                       <p className="mt-1 text-xs text-black/45">{product.brand || "GJC"} · ₹{Number(product.base_price).toLocaleString("en-IN")}</p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-                      <span className={`rounded-full px-3 py-1 text-xs font-bold ${product.status === "active" ? "bg-green-50 text-green-700" : product.status === "archived" ? "bg-black/5 text-black/45" : "bg-amber-50 text-amber-700"}`}>{product.status}</span>
-                      <form action={updateStatus} className="flex items-center gap-2">
-                        <input type="hidden" name="id" value={product.id} />
-                        <select name="status" defaultValue={product.status} className="rounded-lg border border-black/10 bg-white px-2 py-2 text-xs" aria-label={`Status for ${product.name}`}><option value="draft">Draft</option><option value="active">Publish</option><option value="archived">Archive</option></select>
-                        <button className="rounded-lg border border-black/10 px-3 py-2 text-xs font-bold">Save</button>
-                      </form>
-                    </div>
+                    <ProductStatusControl
+                      productId={product.id}
+                      productName={product.name}
+                      initialStatus={product.status as "draft" | "active" | "archived"}
+                    />
                   </article>
                 );
               })}
