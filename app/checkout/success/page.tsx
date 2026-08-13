@@ -2,8 +2,12 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 
-export default function CheckoutSuccess({ searchParams }: { searchParams: { order?: string } }) {
+export default function CheckoutSuccess() {
+  const searchParams = useSearchParams();
+  const order = searchParams.get("order");
+
   useEffect(() => {
     localStorage.removeItem("gjc-cart");
     window.dispatchEvent(new Event("gjc-cart-updated"));
@@ -16,7 +20,7 @@ export default function CheckoutSuccess({ searchParams }: { searchParams: { orde
         <p className="mt-6 text-xs font-bold uppercase tracking-[.3em] text-[var(--accent)]">GJC ORDER CONFIRMED</p>
         <h1 className="mt-2 text-4xl font-bold">Thank you!</h1>
         <p className="mt-4 text-sm leading-6 text-black/55">Your payment has been verified and your order is confirmed. We’ll keep the order updated as it moves toward dispatch.</p>
-        {searchParams.order && <p className="mt-6 rounded-xl bg-black/[.03] p-3 text-sm font-semibold break-all">Order: {searchParams.order}</p>}
+        {order && <p className="mt-6 rounded-xl bg-black/[.03] p-3 text-sm font-semibold break-all">Order: {order}</p>}
         <div className="mt-7 flex flex-wrap justify-center gap-3">
           <Link href="/shop" className="rounded-xl bg-[#171717] px-5 py-3 text-sm font-bold text-white">Continue shopping</Link>
           <Link href="/account" className="rounded-xl border border-black/10 px-5 py-3 text-sm font-bold">View account</Link>
