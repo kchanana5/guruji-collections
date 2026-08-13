@@ -1,41 +1,11 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import CatalogGrid from "@/components/catalog-grid";
+import { productImageUrl } from "@/lib/product-image";
 
 export default async function NewArrivalsPage() {
   const supabase = await createClient();
-  const { data } = await supabase
-    .from("products")
-    .select("id,name,slug,brand,base_price,created_at,product_images(storage_path,sort_order,alt_text)")
-    .eq("status", "active")
-    .order("created_at", { ascending: false })
-    .limit(12);
-
-  const products = (data ?? []).map((product) => {
-    const image = [...(product.product_images ?? [])].sort((a, b) => a.sort_order - b.sort_order)[0];
-    return {
-      id: product.id,
-      name: product.name,
-      slug: product.slug,
-      brand: product.brand,
-      base_price: product.base_price,
-      imageUrl: image?.storage_path ? supabase.storage.from("product-images").getPublicUrl(image.storage_path).data.publicUrl : null,
-      altText: image?.alt_text,
-    };
-  });
-
-  return (
-    <main className="min-h-screen">
-      <header className="border-b border-[var(--border)] bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 lg:px-8">
-          <Link href="/" className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--brand)] text-sm font-bold tracking-widest text-white">GJC</span><span className="text-sm font-bold tracking-[0.25em]">GURUJI</span></Link>
-          <nav className="flex items-center gap-5 text-sm"><Link href="/shop">Shop</Link><Link href="/cart">Cart</Link><Link href="/account">Account</Link></nav>
-        </div>
-      </header>
-      <section className="mx-auto max-w-7xl px-5 py-10 lg:px-8">
-        <div className="border-b border-[var(--border)] pb-8"><p className="text-xs font-bold uppercase tracking-[0.3em] text-[var(--accent)]">GJC COLLECTION</p><h1 className="mt-2 text-4xl font-semibold">New arrivals</h1><p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">The latest pieces published to the GJC catalog.</p></div>
-        <div className="mt-10"><CatalogGrid products={products} /></div>
-      </section>
-    </main>
-  );
+  const { data } = await supabase.from("products").select("id,name,slug,brand,base_price,created_at,product_images(storage_path,sort_order,alt_text)").eq("status", "active").order("created_at", { ascending: false }).limit(12);
+  const products = (data ?? []).map((product) => { const image = [...(product.product_images ?? [])].sort((a,b) => a.sort_order-b.sort_order)[0]; return { id: product.id, name: product.name, slug: product.slug, brand: product.brand, base_price: product.base_price, imageUrl: productImageUrl(supabase, image?.storage_path), altText: image?.alt_text }; });
+  return <main className="min-h-screen"><header className="border-b border-[var(--border)] bg-white"><div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5 lg:px-8"><Link href="/" className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--brand)] text-sm font-bold tracking-widest text-white">GJC</span><span className="text-sm font-bold tracking-[0.25em]">GURUJI</span></Link><nav className="flex items-center gap-5 text-sm"><Link href="/shop">Shop</Link><Link href="/cart">Cart</Link><Link href="/account">Account</Link></nav></div></header><section className="mx-auto max-w-7xl px-5 py-10 lg:px-8"><div className="border-b border-[var(--border)] pb-8"><p className="text-xs font-bold uppercase tracking-[0.3em] text-[var(--accent)]">GJC COLLECTION</p><h1 className="mt-2 text-4xl font-semibold">New arrivals</h1><p className="mt-3 max-w-xl text-sm leading-6 text-[var(--muted)]">The latest pieces published to the GJC catalog.</p></div><div className="mt-10"><CatalogGrid products={products} /></div></section></main>;
 }
