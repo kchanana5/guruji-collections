@@ -2,7 +2,7 @@ name: GJC CI
 
 on:
   push:
-    branches: ["main", "feature/admin-auth"]
+    branches: ["main", "feature/storefront-catalog", "feature/admin-auth"]
   pull_request:
     branches: ["main"]
 
