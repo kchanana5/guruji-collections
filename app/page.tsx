@@ -1,12 +1,31 @@
 import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+import CatalogGrid from "@/components/catalog-grid";
 
-const featuredCategories = [
-  { name: "Women", href: "/shop/women" },
-  { name: "Men", href: "/shop/men" },
-  { name: "New Arrivals", href: "/shop/new-arrivals" },
-];
+export default async function HomePage() {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("products")
+    .select("id,name,slug,brand,base_price,product_images(storage_path,sort_order,alt_text)")
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(4);
 
-export default function HomePage() {
+  const products = (data ?? []).map((product) => {
+    const images = [...(product.product_images ?? [])].sort((a, b) => a.sort_order - b.sort_order);
+    return {
+      id: product.id,
+      name: product.name,
+      slug: product.slug,
+      brand: product.brand,
+      base_price: product.base_price,
+      imageUrl: images[0]?.storage_path
+        ? supabase.storage.from("product-images").getPublicUrl(images[0].storage_path).data.publicUrl
+        : null,
+      altText: images[0]?.alt_text,
+    };
+  });
+
   return (
     <main className="min-h-screen">
       <header className="border-b border-[var(--border)] bg-[var(--surface)]">
@@ -29,9 +48,9 @@ export default function HomePage() {
           </nav>
 
           <div className="flex items-center gap-4 text-sm">
-            <Link href="/search">Search</Link>
+            <Link href="/shop">Search</Link>
             <Link href="/account">Account</Link>
-            <Link href="/cart">Cart (0)</Link>
+            <Link href="/cart">Cart</Link>
           </div>
         </div>
       </header>
@@ -57,10 +76,10 @@ export default function HomePage() {
 
         <div className="flex min-h-[420px] items-end rounded-[2rem] border border-[var(--border)] bg-gradient-to-br from-stone-200 via-stone-100 to-amber-100 p-8">
           <div className="max-w-md rounded-2xl bg-white/80 p-6 backdrop-blur">
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">Coming next</p>
-            <h2 className="mt-2 text-2xl font-semibold">The GJC AI catalog assistant</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">GJC catalog</p>
+            <h2 className="mt-2 text-2xl font-semibold">Simple shopping, built around the product.</h2>
             <p className="mt-3 text-sm leading-6 text-[var(--muted)]">
-              Upload a product photo, add your price, and let GJC prepare the product listing for your review.
+              Browse published pieces, choose available variants, and add your favourites to the cart in a few clicks.
             </p>
           </div>
         </div>
@@ -69,26 +88,27 @@ export default function HomePage() {
       <section className="mx-auto max-w-7xl px-5 pb-16 lg:px-8">
         <div className="mb-7 flex items-end justify-between gap-4">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">Explore GJC</p>
-            <h2 className="mt-2 text-2xl font-semibold">Start with a collection</h2>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">Latest from GJC</p>
+            <h2 className="mt-2 text-2xl font-semibold">Recently added</h2>
           </div>
           <Link href="/shop" className="text-sm font-semibold underline underline-offset-4">View all</Link>
         </div>
+        <CatalogGrid products={products} />
+      </section>
 
-        <div className="grid gap-4 sm:grid-cols-3">
-          {featuredCategories.map((category) => (
-            <Link
-              key={category.href}
-              href={category.href}
-              className="group rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-6 transition hover:-translate-y-0.5 hover:shadow-lg"
-            >
-              <div className="aspect-[4/3] rounded-xl bg-stone-100" />
-              <div className="mt-5 flex items-center justify-between">
-                <span className="font-semibold">{category.name}</span>
-                <span className="transition-transform group-hover:translate-x-1">→</span>
-              </div>
-            </Link>
-          ))}
+      <section className="mx-auto max-w-7xl px-5 pb-20 lg:px-8">
+        <div className="rounded-[2rem] border border-[var(--border)] bg-white p-8 sm:p-10">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">Shop by category</p>
+              <h2 className="mt-2 text-2xl font-semibold">Find your next GJC piece.</h2>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/shop/women" className="rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold">Women</Link>
+              <Link href="/shop/men" className="rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold">Men</Link>
+              <Link href="/shop/new-arrivals" className="rounded-full bg-[#171717] px-5 py-2.5 text-sm font-semibold text-white">New arrivals</Link>
+            </div>
+          </div>
         </div>
       </section>
 
