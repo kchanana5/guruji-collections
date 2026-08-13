@@ -11,7 +11,7 @@ export default async function ShopPage({ searchParams }: { searchParams: Promise
   const supabase = await createClient();
   let query = supabase
     .from("products")
-    .select("id,name,slug,brand,short_description,base_price,currency,product_images(storage_path,sort_order)")
+    .select("id,name,slug,brand,short_description,base_price,currency,product_images(storage_path,sort_order,alt_text)")
     .eq("status", "active")
     .order("created_at", { ascending: false });
 
