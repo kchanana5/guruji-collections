@@ -32,6 +32,11 @@ export default function CatalogGrid({ products }: { products: ProductCard[] }) {
               <img
                 src={product.imageUrl}
                 alt={product.altText || product.name}
+                onError={(event) => {
+                  event.currentTarget.onerror = null;
+                  event.currentTarget.src = "/guruji-mark.svg";
+                  event.currentTarget.className = "h-full w-full object-contain p-10 opacity-60";
+                }}
                 className="h-full w-full object-cover transition duration-500 group-hover:scale-[1.03]"
               />
             ) : (
