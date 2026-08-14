@@ -4,22 +4,31 @@ async function token() {
   const email = process.env.SHIPROCKET_EMAIL;
   const password = process.env.SHIPROCKET_PASSWORD;
   if (!email || !password) throw new Error("Shiprocket is not configured");
-  const res = await fetch(`${API}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-    cache: "no-store",
-  });
+  const res = await fetch(`${API}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }), cache: "no-store" });
   if (!res.ok) throw new Error(`Shiprocket auth failed: ${res.status}`);
   const data = await res.json();
   if (!data.token) throw new Error("Shiprocket did not return a token");
   return data.token as string;
 }
 
+async function getPickupLocation(bearer: string) {
+  const configured = process.env.SHIPROCKET_PICKUP_LOCATION?.trim();
+  if (configured) return configured;
+  const res = await fetch(`${API}/settings/company/pickup`, { headers: { Authorization: `Bearer ${bearer}` }, cache: "no-store" });
+  if (!res.ok) throw new Error(`Shiprocket pickup locations failed: ${res.status}`);
+  const data = await res.json();
+  const locations = data?.data?.shipping_address || data?.shipping_address || [];
+  const active = locations.filter((x: any) => x.status === 1 || x.status === true);
+  const preferred = active.find((x: any) => x.is_default === 1 || x.is_default === true || x.default_location === 1);
+  const name = preferred?.pickup_location || preferred?.pickup_code || active[0]?.pickup_location || active[0]?.pickup_code;
+  if (!name) throw new Error("No active Shiprocket pickup location found. Add a pickup location in Shiprocket or set SHIPROCKET_PICKUP_LOCATION.");
+  return String(name);
+}
+
 export async function createShiprocketShipment(input: {
   orderId: string;
   orderDate: string;
-  pickupLocation: string;
+  pickupLocation?: string;
   customerName: string;
   phone: string;
   email?: string;
@@ -31,19 +40,21 @@ export async function createShiprocketShipment(input: {
   pincode: string;
   items: { sku: string; name: string; units: number; sellingPrice: number }[];
   subtotal: number;
+  totalDiscount?: number;
   weightKg: number;
   lengthCm: number;
   breadthCm: number;
   heightCm: number;
 }) {
   const bearer = await token();
+  const pickupLocation = input.pickupLocation || await getPickupLocation(bearer);
   const create = await fetch(`${API}/orders/create/adhoc`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${bearer}` },
     body: JSON.stringify({
       order_id: input.orderId,
       order_date: input.orderDate,
-      pickup_location: input.pickupLocation,
+      pickup_location: pickupLocation,
       billing_customer_name: input.customerName,
       billing_phone: input.phone,
       billing_email: input.email || "",
@@ -64,6 +75,7 @@ export async function createShiprocketShipment(input: {
       shipping_pincode: input.pincode,
       order_items: input.items.map((i) => ({ sku: i.sku, name: i.name, units: i.units, selling_price: i.sellingPrice })),
       payment_method: "Prepaid",
+      total_discount: Number(input.totalDiscount || 0),
       sub_total: input.subtotal,
       length: input.lengthCm,
       breadth: input.breadthCm,
