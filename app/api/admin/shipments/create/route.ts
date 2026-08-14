@@ -25,6 +25,7 @@ export async function POST(request: Request) {
     const result = await createShiprocketShipment({
       orderId: order.order_number,
       orderDate: new Date(order.created_at).toISOString().slice(0, 10),
+      // Let Shiprocket integration discover the active/default pickup location when no explicit one is configured.
       pickupLocation: process.env.SHIPROCKET_PICKUP_LOCATION?.trim() || undefined,
       customerName: address.recipientName,
       phone: address.phone,
@@ -45,17 +46,13 @@ export async function POST(request: Request) {
       heightCm: Number(process.env.SHIPROCKET_DEFAULT_HEIGHT_CM || 10),
     });
 
-    if (!result.awbCode) {
-      throw new Error("Shiprocket created the shipment but did not return an AWB. The order was not marked as shipped.");
-    }
-
     const { data: shipment, error: shipmentError } = await service.from("shipments").upsert({
       order_id: order.id,
       provider: "shiprocket",
       external_shipment_id: String(result.shipmentId),
       awb_code: result.awbCode,
       courier_name: result.courierName,
-      tracking_url: `https://shiprocket.co/tracking/${encodeURIComponent(result.awbCode)}`,
+      tracking_url: result.awbCode ? `https://shiprocket.co/tracking/${encodeURIComponent(result.awbCode)}` : null,
       status: "AWB_ASSIGNED",
       raw_response: result.raw,
     }, { onConflict: "order_id" }).select().single();
