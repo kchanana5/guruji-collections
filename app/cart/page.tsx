@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import GjcLogo from "@/components/gjc-logo";
 
 type Item = {
   variantId: string;
@@ -41,10 +42,7 @@ export default function CartPage() {
     let cancelled = false;
     const refreshCoupon = async () => {
       const supabase = createClient();
-      const { data, error } = await supabase.rpc("validate_coupon", {
-        p_code: coupon.code,
-        p_order_value: subtotal,
-      });
+      const { data, error } = await supabase.rpc("validate_coupon", { p_code: coupon.code, p_order_value: subtotal });
       if (cancelled) return;
       const row = Array.isArray(data) ? data[0] : data;
       if (error || !row?.valid) {
@@ -59,9 +57,7 @@ export default function CartPage() {
       localStorage.setItem("gjc-coupon", JSON.stringify(refreshed));
     };
     refreshCoupon();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [subtotal, coupon?.code]);
 
   function update(index: number, quantity: number) {
@@ -82,10 +78,7 @@ export default function CartPage() {
 
   async function applyCoupon() {
     const code = couponCode.trim();
-    if (!code) {
-      setCouponMessage("Enter a coupon code.");
-      return;
-    }
+    if (!code) { setCouponMessage("Enter a coupon code."); return; }
     setCouponBusy(true);
     setCouponMessage("");
     const supabase = createClient();
@@ -115,7 +108,7 @@ export default function CartPage() {
     <main className="min-h-screen bg-[var(--background)]">
       <header className="border-b border-[var(--border)] bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-5 sm:py-5 lg:px-8">
-          <Link href="/" className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-full bg-[var(--brand)] text-sm font-bold tracking-widest text-white">GJC</span><span className="hidden text-sm font-bold tracking-[0.25em] sm:block">GURUJI</span></Link>
+          <GjcLogo />
           <Link href="/shop" style={{ color: "#171717", backgroundColor: "#fff" }} className="rounded-xl border border-black/10 px-4 py-2.5 text-sm font-semibold">Continue shopping</Link>
         </div>
       </header>
@@ -149,19 +142,12 @@ export default function CartPage() {
               <div className="mt-5">
                 <label htmlFor="coupon" className="text-sm font-semibold">Have a coupon?</label>
                 {coupon ? (
-                  <div className="mt-2 flex items-center justify-between rounded-xl border border-green-200 bg-green-50 px-3 py-3 text-sm text-green-800">
-                    <span><strong>{coupon.code}</strong> applied</span>
-                    <button type="button" onClick={removeCoupon} className="font-bold underline">Remove</button>
-                  </div>
+                  <div className="mt-2 flex items-center justify-between rounded-xl border border-green-200 bg-green-50 px-3 py-3 text-sm text-green-800"><span><strong>{coupon.code}</strong> applied</span><button type="button" onClick={removeCoupon} className="font-bold underline">Remove</button></div>
                 ) : (
-                  <div className="mt-2 flex gap-2">
-                    <input id="coupon" value={couponCode} onChange={e => setCouponCode(e.target.value.toUpperCase())} onKeyDown={e => { if (e.key === "Enter") applyCoupon(); }} placeholder="Enter coupon code" className="min-w-0 flex-1 rounded-xl border border-black/15 bg-white px-3 py-3 text-sm outline-none focus:border-black" />
-                    <button type="button" onClick={applyCoupon} disabled={couponBusy} style={{ color: "#fff", backgroundColor: "#171717" }} className="shrink-0 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-50">{couponBusy ? "Applying…" : "Apply"}</button>
-                  </div>
+                  <div className="mt-2 flex gap-2"><input id="coupon" value={couponCode} onChange={e => setCouponCode(e.target.value.toUpperCase())} onKeyDown={e => { if (e.key === "Enter") applyCoupon(); }} placeholder="Enter coupon code" className="min-w-0 flex-1 rounded-xl border border-black/15 bg-white px-3 py-3 text-sm outline-none focus:border-black" /><button type="button" onClick={applyCoupon} disabled={couponBusy} style={{ color: "#fff", backgroundColor: "#171717" }} className="shrink-0 rounded-xl px-4 py-3 text-sm font-bold disabled:opacity-50">{couponBusy ? "Applying…" : "Apply"}</button></div>
                 )}
                 {couponMessage && !coupon && <p role="status" className="mt-2 text-xs text-red-600">{couponMessage}</p>}
               </div>
-
               <div className="mt-5 flex justify-between text-sm"><span>Subtotal</span><span className="font-bold">₹{subtotal.toLocaleString("en-IN")}</span></div>
               {discount > 0 && <div className="mt-3 flex justify-between text-sm text-green-700"><span>Coupon discount</span><span className="font-bold">−₹{discount.toLocaleString("en-IN")}</span></div>}
               <div className="mt-4 flex justify-between border-t pt-4 text-sm"><span>Shipping</span><span className="text-black/50">Calculated at checkout</span></div>
