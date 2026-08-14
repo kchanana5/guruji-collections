@@ -41,7 +41,7 @@ export default async function ProductsPage() {
                 return (
                   <article key={product.id} className="grid gap-4 p-5 sm:grid-cols-[72px_1fr_auto] sm:items-center sm:p-6">
                     <div className="h-20 w-20 overflow-hidden rounded-2xl bg-[#f7f3ec] sm:h-[72px] sm:w-[72px]">
-                      {imageUrl ? <img src={imageUrl} alt={product.name} onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = "/guruji-mark.svg"; event.currentTarget.className = "h-full w-full object-contain p-3 opacity-60"; }} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-xs font-bold text-black/25">GJC</div>}
+                      {imageUrl ? <img src={imageUrl} alt={product.name} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-xs font-bold text-black/25">GJC</div>}
                     </div>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">

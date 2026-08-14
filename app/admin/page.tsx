@@ -43,7 +43,7 @@ export default async function AdminDashboard() {
                 return (
                   <div key={product.id} className="flex items-center gap-4 px-6 py-4">
                     <div className="h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-[#f7f3ec]">
-                      {imageUrl ? <img src={imageUrl} alt={product.name} onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = "/guruji-mark.svg"; event.currentTarget.className = "h-full w-full object-contain p-3 opacity-60"; }} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-xs font-bold text-black/25">GJC</div>}
+                      {imageUrl ? <img src={imageUrl} alt={product.name} className="h-full w-full object-cover" /> : <div className="flex h-full items-center justify-center text-xs font-bold text-black/25">GJC</div>}
                     </div>
                     <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="truncate font-bold">{product.name}</p>{product.ai_generated && <span className="rounded-full bg-[#f7f3ec] px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[#8a6a35]">AI</span>}</div><p className="mt-1 text-xs text-black/45">{product.brand || "GJC"} · ₹{Number(product.base_price).toLocaleString("en-IN")}</p></div>
                     <span className={`rounded-full px-3 py-1 text-xs font-bold ${product.status === "active" ? "bg-green-50 text-green-700" : product.status === "archived" ? "bg-black/5 text-black/45" : "bg-amber-50 text-amber-700"}`}>{product.status}</span>
