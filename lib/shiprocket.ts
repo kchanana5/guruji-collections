@@ -25,6 +25,17 @@ async function getPickupLocation(bearer: string) {
   return String(name);
 }
 
+function splitCustomerName(fullName: string) {
+  const parts = fullName.trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return { firstName: "Customer", lastName: "Customer" };
+  return {
+    firstName: parts[0],
+    // Shiprocket requires a non-empty last name. For a single-name customer,
+    // use a neutral fallback rather than sending an invalid request.
+    lastName: parts.slice(1).join(" ") || "Customer",
+  };
+}
+
 export async function createShiprocketShipment(input: {
   orderId: string;
   orderDate: string;
@@ -49,6 +60,8 @@ export async function createShiprocketShipment(input: {
 }) {
   const bearer = await token();
   const pickupLocation = input.pickupLocation || await getPickupLocation(bearer);
+  const { firstName, lastName } = splitCustomerName(input.customerName);
+
   const create = await fetch(`${API}/orders/create/adhoc`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${bearer}` },
@@ -57,6 +70,8 @@ export async function createShiprocketShipment(input: {
       order_date: input.orderDate,
       pickup_location: pickupLocation,
       billing_customer_name: input.customerName,
+      billing_first_name: firstName,
+      billing_last_name: lastName,
       billing_phone: input.phone,
       billing_email: input.email || "",
       billing_address: input.address,
@@ -67,6 +82,8 @@ export async function createShiprocketShipment(input: {
       billing_pincode: input.pincode,
       shipping_is_billing: true,
       shipping_customer_name: input.customerName,
+      shipping_first_name: firstName,
+      shipping_last_name: lastName,
       shipping_phone: input.phone,
       shipping_address: input.address,
       shipping_address_2: input.address2 || "",
@@ -84,7 +101,25 @@ export async function createShiprocketShipment(input: {
       weight: input.weightKg,
     }),
   });
-  if (!create.ok) throw new Error(`Shiprocket order creation failed: ${create.status} ${await create.text()}`);
+
+  if (!create.ok) {
+    const raw = await create.text();
+    let message = `Shiprocket order creation failed: ${create.status}`;
+    try {
+      const details = JSON.parse(raw);
+      const validation = details?.errors;
+      if (validation && typeof validation === "object") {
+        const fields = Object.entries(validation).map(([field, value]) => `${field}: ${Array.isArray(value) ? value.join(", ") : String(value)}`);
+        if (fields.length) message += ` — ${fields.join("; ")}`;
+      } else if (details?.message) {
+        message += ` — ${details.message}`;
+      }
+    } catch {
+      if (raw) message += ` — ${raw.slice(0, 300)}`;
+    }
+    throw new Error(message);
+  }
+
   const created = await create.json();
   const shipmentId = Number(created.shipment_id || created.shipment?.shipment_id);
   const shiprocketOrderId = String(created.order_id || created.order?.order_id || "");
@@ -95,7 +130,10 @@ export async function createShiprocketShipment(input: {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${bearer}` },
     body: JSON.stringify({ shipment_id: shipmentId }),
   });
-  if (!awb.ok) throw new Error(`Shiprocket AWB assignment failed: ${awb.status} ${await awb.text()}`);
+  if (!awb.ok) {
+    const raw = await awb.text();
+    throw new Error(`Shiprocket AWB assignment failed: ${awb.status}${raw ? ` — ${raw.slice(0, 300)}` : ""}`);
+  }
   const awbData = await awb.json();
   const shipment = awbData.response?.data?.shipment || awbData.response?.shipment || awbData.shipment || {};
   return {
