@@ -10,6 +10,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const items = Array.isArray(body.items) ? body.items : [];
     const address = body.address;
+    const paymentMethod = body.paymentMethod === "cod" ? "cod" : "razorpay";
     const couponCode = typeof body.couponCode === "string" ? body.couponCode.trim().toUpperCase() : "";
     const email = typeof address?.email === "string" ? address.email.trim().toLowerCase() : "";
     const name = typeof address?.recipientName === "string" ? address.recipientName.trim() : "";
@@ -27,9 +28,10 @@ export async function POST(request: Request) {
     if (!/^\d{6}$/.test(postalCode)) return NextResponse.json({ error: "A valid 6 digit PIN code is required" }, { status: 400 });
 
     const adminKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    const razorpayKeyId = process.env.RAZORPAY_KEY_ID;
-    const razorpaySecret = process.env.RAZORPAY_KEY_SECRET;
-    if (!adminKey || !razorpayKeyId || !razorpaySecret) return NextResponse.json({ error: "Checkout is not configured yet" }, { status: 503 });
+    if (!adminKey) return NextResponse.json({ error: "Checkout is not configured yet" }, { status: 503 });
+    if (paymentMethod === "razorpay" && (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET)) {
+      return NextResponse.json({ error: "Online payment is not configured yet. Please choose Cash on Delivery." }, { status: 503 });
+    }
 
     const supabase = await createClient();
     const variantIds = items.map((i: any) => i.variantId).filter(Boolean);
@@ -57,13 +59,27 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     const number = orderNumber();
     const shippingAddress = { email, recipientName: name, phone, line1, line2: typeof address?.line2 === "string" ? address.line2.trim() : "", city, state, postalCode, country: "IN" };
-    const { data: order, error: orderError } = await service.from("orders").insert({ order_number: number, user_id: user?.id ?? null, subtotal, discount_total: discount, grand_total: grandTotal, shipping_address: shippingAddress, notes: couponCode ? `Coupon: ${couponCode}` : null }).select("id,order_number,grand_total").single();
+    const { data: order, error: orderError } = await service.from("orders").insert({ order_number: number, user_id: user?.id ?? null, subtotal, discount_total: discount, grand_total: grandTotal, shipping_address: shippingAddress, notes: [couponCode ? `Coupon: ${couponCode}` : "", paymentMethod === "cod" ? "Payment: Cash on Delivery" : ""].filter(Boolean).join(" | ") || null }).select("id,order_number,grand_total").single();
     if (orderError) throw orderError;
     createdOrderId = order.id;
 
     const { error: itemError } = await service.from("order_items").insert(orderItems.map(i => ({ ...i, order_id: order.id })));
     if (itemError) throw itemError;
 
+    if (paymentMethod === "cod") {
+      const { error: inventoryError } = await service.rpc("deduct_order_inventory", { p_order_id: order.id });
+      if (inventoryError) throw inventoryError;
+      const { error: paymentError } = await service.from("payments").insert({ order_id: order.id, provider: "cod", status: "pending", amount: grandTotal, currency: "INR", raw_response: { method: "cash_on_delivery" } });
+      if (paymentError) throw paymentError;
+      if (couponCode) {
+        const { error: couponUsageError } = await service.rpc("increment_coupon_usage", { p_code: couponCode });
+        if (couponUsageError) throw couponUsageError;
+      }
+      return NextResponse.json({ orderId: order.id, orderNumber: number, paymentMethod: "cod", subtotal, discount, total: grandTotal });
+    }
+
+    const razorpayKeyId = process.env.RAZORPAY_KEY_ID!;
+    const razorpaySecret = process.env.RAZORPAY_KEY_SECRET!;
     const razorResponse = await fetch("https://api.razorpay.com/v1/orders", { method: "POST", headers: { Authorization: `Basic ${Buffer.from(`${razorpayKeyId}:${razorpaySecret}`).toString("base64")}`, "Content-Type": "application/json" }, body: JSON.stringify({ amount: Math.round(grandTotal * 100), currency: "INR", receipt: number, notes: { gjc_order_id: order.id, coupon: couponCode || undefined, discount: discount.toFixed(2) } }) });
     if (!razorResponse.ok) {
       const raw = await razorResponse.text(); let details: any = null; try { details = JSON.parse(raw); } catch {}
@@ -80,7 +96,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({ orderId: order.id, orderNumber: number, razorpayOrderId: razorOrder.id, keyId: razorpayKeyId, amount: Math.round(grandTotal * 100), currency: "INR", subtotal, discount, total: grandTotal });
   } catch (error) {
-    if (service && createdOrderId) await service.from("orders").update({ status: "cancelled" }).eq("id", createdOrderId).in("status", ["pending", "awaiting_payment"]);
+    if (service && createdOrderId) await service.from("orders").update({ status: "cancelled" }).eq("id", createdOrderId).in("status", ["pending", "confirmed"]);
     console.error("GJC checkout create", error);
     return NextResponse.json({ error: "Unable to start checkout" }, { status: 500 });
   }
