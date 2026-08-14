@@ -7,9 +7,129 @@ import GjcLogo from "@/components/gjc-logo";
 const primaryCtaStyle = { backgroundColor: "#ffffff", color: "#171717" };
 const secondaryCtaStyle = { backgroundColor: "#181818", color: "#ffffff" };
 
+type Product = {
+  id: string;
+  name: string;
+  slug: string;
+  brand: string | null;
+  base_price: number | string;
+  imageUrl: string | null;
+  altText: string | null;
+};
+
+async function getHomepageProducts(): Promise<Product[]> {
+  try {
+    const supabase = await createClient();
+    const { data, error } = await supabase
+      .from("products")
+      .select("id,name,slug,brand,base_price,product_images(storage_path,sort_order,alt_text)")
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(4);
+
+    if (error || !data) return [];
+
+    return data.map((product) => {
+      const images = Array.isArray(product.product_images)
+        ? [...product.product_images].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        : [];
+      const image = images[0];
+
+      return {
+        id: product.id,
+        name: product.name,
+        slug: product.slug,
+        brand: product.brand,
+        base_price: product.base_price,
+        imageUrl: productImageUrl(supabase, image?.storage_path),
+        altText: image?.alt_text ?? null,
+      };
+    });
+  } catch {
+    // The storefront must remain available even if catalog/Supabase data is unavailable.
+    return [];
+  }
+}
+
 export default async function HomePage() {
-  const supabase = await createClient();
-  const { data } = await supabase.from("products").select("id,name,slug,brand,base_price,product_images(storage_path,sort_order,alt_text)").eq("status", "active").order("created_at", { ascending: false }).limit(4);
-  const products = (data ?? []).map((product) => { const images = [...(product.product_images ?? [])].sort((a,b) => a.sort_order-b.sort_order); return { id: product.id, name: product.name, slug: product.slug, brand: product.brand, base_price: product.base_price, imageUrl: productImageUrl(supabase, images[0]?.storage_path), altText: images[0]?.alt_text }; });
-  return <main className="min-h-screen overflow-x-hidden"><header className="border-b border-[var(--border)] bg-[var(--surface)]"><div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-5 sm:py-5 lg:px-8"><GjcLogo/><nav className="hidden items-center gap-8 text-sm md:flex"><Link href="/shop/women">Women</Link><Link href="/shop/men">Men</Link><Link href="/shop/new-arrivals">New Arrivals</Link><Link href="/about">About</Link></nav><div className="flex items-center gap-3 text-xs sm:gap-4 sm:text-sm"><Link href="/shop">Search</Link><Link href="/account">Account</Link><Link href="/cart">Cart</Link></div></div></header><section className="mx-auto grid max-w-7xl gap-5 px-4 py-8 sm:px-5 sm:py-12 lg:grid-cols-[1.1fr_0.9fr] lg:gap-8 lg:px-8 lg:py-20"><div className="flex flex-col justify-center rounded-[1.5rem] bg-[var(--brand)] px-6 py-10 text-white sm:rounded-[2rem] sm:px-12 sm:py-14 lg:px-16 lg:py-20"><p className="mb-5 text-xs font-semibold uppercase tracking-[0.35em] text-[var(--accent)]">GJC / Curated Fashion</p><h1 className="max-w-2xl text-4xl font-semibold leading-tight sm:text-5xl lg:text-6xl">Everyday style, thoughtfully collected.</h1><p className="mt-6 max-w-xl text-base leading-7 text-white/70 sm:text-lg">Discover clothing selected for modern wardrobes, easy layering, and confident everyday wear.</p><div className="mt-8 flex flex-wrap gap-3"><Link href="/shop" style={primaryCtaStyle} className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-semibold">Shop collection</Link><Link href="/shop/new-arrivals" style={secondaryCtaStyle} className="inline-flex items-center justify-center rounded-full border border-white/30 px-6 py-3 text-sm font-semibold">New arrivals</Link></div></div><div className="flex min-h-[280px] items-end rounded-[1.5rem] border border-[var(--border)] bg-gradient-to-br from-stone-200 via-stone-100 to-amber-100 p-5 sm:min-h-[420px] sm:rounded-[2rem] sm:p-8"><div className="max-w-md rounded-2xl bg-white/90 p-5 backdrop-blur sm:p-6"><p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">GJC catalog</p><h2 className="mt-2 text-xl font-semibold sm:text-2xl">Simple shopping, built around the product.</h2><p className="mt-3 text-sm leading-6 text-[var(--muted)]">Browse published pieces, choose available variants, and add your favourites to the cart in a few clicks.</p></div></div></section><section className="mx-auto max-w-7xl px-4 pb-12 sm:px-5 sm:pb-16 lg:px-8"><div className="mb-7 flex items-end justify-between gap-4"><div><p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">Latest from GJC</p><h2 className="mt-2 text-2xl font-semibold">Recently added</h2></div><Link href="/shop" className="shrink-0 text-sm font-semibold underline underline-offset-4">View all</Link></div><CatalogGrid products={products} /></section><section className="mx-auto max-w-7xl px-4 pb-16 sm:px-5 sm:pb-20 lg:px-8"><div className="rounded-[1.5rem] border border-[var(--border)] bg-white p-6 sm:rounded-[2rem] sm:p-10"><div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">Shop by category</p><h2 className="mt-2 text-2xl font-semibold">Find your next GJC piece.</h2></div><div className="flex flex-wrap gap-3"><Link href="/shop/women" style={{ backgroundColor: "#ffffff", color: "#171717" }} className="inline-flex items-center justify-center rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold">Women</Link><Link href="/shop/men" style={{ backgroundColor: "#ffffff", color: "#171717" }} className="inline-flex items-center justify-center rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold">Men</Link><Link href="/shop/new-arrivals" style={secondaryCtaStyle} className="inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold">New arrivals</Link></div></div></div></section><footer className="border-t border-[var(--border)] bg-[var(--surface)]"><div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-7 text-sm text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between sm:px-5 lg:px-8"><p>© 2022 Guruji Collections (GJC)</p><div className="flex flex-wrap gap-5"><Link href="/privacy">Privacy</Link><Link href="/terms">Terms</Link><Link href="/contact">Contact</Link></div></div></footer></main>;
+  const products = await getHomepageProducts();
+
+  return (
+    <main className="min-h-screen overflow-x-hidden">
+      <header className="border-b border-[var(--border)] bg-[var(--surface)]">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-5 sm:py-5 lg:px-8">
+          <GjcLogo />
+          <nav className="hidden items-center gap-8 text-sm md:flex">
+            <Link href="/shop/women">Women</Link>
+            <Link href="/shop/men">Men</Link>
+            <Link href="/shop/new-arrivals">New Arrivals</Link>
+            <Link href="/about">About</Link>
+          </nav>
+          <div className="flex items-center gap-3 text-xs sm:gap-4 sm:text-sm">
+            <Link href="/shop">Search</Link>
+            <Link href="/account">Account</Link>
+            <Link href="/cart">Cart</Link>
+          </div>
+        </div>
+      </header>
+
+      <section className="mx-auto grid max-w-7xl gap-5 px-4 py-8 sm:px-5 sm:py-12 lg:grid-cols-[1.1fr_0.9fr] lg:gap-8 lg:px-8 lg:py-20">
+        <div className="flex flex-col justify-center rounded-[1.5rem] bg-[var(--brand)] px-6 py-10 text-white sm:rounded-[2rem] sm:px-12 sm:py-14 lg:px-16 lg:py-20">
+          <p className="mb-5 text-xs font-semibold uppercase tracking-[0.35em] text-[var(--accent)]">GJC / Curated Fashion</p>
+          <h1 className="max-w-2xl text-4xl font-semibold leading-tight sm:text-5xl lg:text-6xl">Everyday style, thoughtfully collected.</h1>
+          <p className="mt-6 max-w-xl text-base leading-7 text-white/70 sm:text-lg">Discover clothing selected for modern wardrobes, easy layering, and confident everyday wear.</p>
+          <div className="mt-8 flex flex-wrap gap-3">
+            <Link href="/shop" style={primaryCtaStyle} className="inline-flex items-center justify-center rounded-full px-6 py-3 text-sm font-semibold">Shop collection</Link>
+            <Link href="/shop/new-arrivals" style={secondaryCtaStyle} className="inline-flex items-center justify-center rounded-full border border-white/30 px-6 py-3 text-sm font-semibold">New arrivals</Link>
+          </div>
+        </div>
+
+        <div className="flex min-h-[280px] items-end rounded-[1.5rem] border border-[var(--border)] bg-gradient-to-br from-stone-200 via-stone-100 to-amber-100 p-5 sm:min-h-[420px] sm:rounded-[2rem] sm:p-8">
+          <div className="max-w-md rounded-2xl bg-white/90 p-5 backdrop-blur sm:p-6">
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">GJC catalog</p>
+            <h2 className="mt-2 text-xl font-semibold sm:text-2xl">Simple shopping, built around the product.</h2>
+            <p className="mt-3 text-sm leading-6 text-[var(--muted)]">Browse published pieces, choose available variants, and add your favourites to the cart in a few clicks.</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-7xl px-4 pb-12 sm:px-5 sm:pb-16 lg:px-8">
+        <div className="mb-7 flex items-end justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--muted)]">Latest from GJC</p>
+            <h2 className="mt-2 text-2xl font-semibold">Recently added</h2>
+          </div>
+          <Link href="/shop" className="shrink-0 text-sm font-semibold underline underline-offset-4">View all</Link>
+        </div>
+        <CatalogGrid products={products} />
+      </section>
+
+      <section className="mx-auto max-w-7xl px-4 pb-16 sm:px-5 sm:pb-20 lg:px-8">
+        <div className="rounded-[1.5rem] border border-[var(--border)] bg-white p-6 sm:rounded-[2rem] sm:p-10">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.3em] text-[var(--accent)]">Shop by category</p>
+              <h2 className="mt-2 text-2xl font-semibold">Find your next GJC piece.</h2>
+            </div>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/shop/women" style={{ backgroundColor: "#ffffff", color: "#171717" }} className="inline-flex items-center justify-center rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold">Women</Link>
+              <Link href="/shop/men" style={{ backgroundColor: "#ffffff", color: "#171717" }} className="inline-flex items-center justify-center rounded-full border border-black/10 px-5 py-2.5 text-sm font-semibold">Men</Link>
+              <Link href="/shop/new-arrivals" style={secondaryCtaStyle} className="inline-flex items-center justify-center rounded-full px-5 py-2.5 text-sm font-semibold">New arrivals</Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer className="border-t border-[var(--border)] bg-[var(--surface)]">
+        <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-7 text-sm text-[var(--muted)] sm:flex-row sm:items-center sm:justify-between sm:px-5 lg:px-8">
+          <p>© 2022 Guruji Collections (GJC)</p>
+          <div className="flex flex-wrap gap-5">
+            <Link href="/privacy">Privacy</Link>
+            <Link href="/terms">Terms</Link>
+            <Link href="/contact">Contact</Link>
+          </div>
+        </div>
+      </footer>
+    </main>
+  );
 }
