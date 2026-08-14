@@ -63,7 +63,7 @@ export async function GET(request: Request) {
     if (
       razorPayment.order_id !== payment.provider_order_id ||
       Number(razorPayment.amount) !== expectedAmount ||
-      !["authorized", "captured"].includes(razorPayment.status)
+      razorPayment.status !== "captured"
     ) {
       return NextResponse.redirect(new URL("/checkout/failed?reason=payment", request.url));
     }
@@ -74,7 +74,7 @@ export async function GET(request: Request) {
       return NextResponse.redirect(new URL("/checkout/failed?reason=stock", request.url));
     }
 
-    await db
+    const { data: paidRows, error: paymentError } = await db
       .from("payments")
       .update({
         provider_payment_id: paymentId,
@@ -82,7 +82,20 @@ export async function GET(request: Request) {
         raw_response: { verified: true, razorpay_status: razorPayment.status },
         updated_at: new Date().toISOString(),
       })
-      .eq("id", payment.id);
+      .eq("id", payment.id)
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
+
+    if (paymentError) throw paymentError;
+
+    if (paidRows) {
+      const { data: order } = await db.from("orders").select("coupon_code").eq("id", orderId).maybeSingle();
+      if (order?.coupon_code) {
+        const { data: couponRedeemed, error: couponUsageError } = await db.rpc("increment_coupon_usage", { p_code: order.coupon_code });
+        if (couponUsageError || couponRedeemed === false) console.error("GJC Razorpay coupon redemption could not be recorded", couponUsageError?.message || "coupon unavailable at confirmation");
+      }
+    }
 
     await db
       .from("orders")
