@@ -17,7 +17,7 @@ export default function AddressesPage() {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { window.location.href = "/account"; return; }
-    const { data, error } = await supabase.from("customer_addresses").select("*").order("is_default", { ascending: false }).order("created_at", { ascending: false });
+    const { data, error } = await supabase.from("addresses").select("*").eq("user_id", user.id).order("is_default", { ascending: false }).order("created_at", { ascending: false });
     if (error) setError(error.message); else setAddresses(data ?? []);
     setLoading(false);
   }
@@ -28,14 +28,14 @@ export default function AddressesPage() {
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { window.location.href = "/account"; return; }
-    const { error } = await supabase.from("customer_addresses").insert({ ...form, user_id: user.id });
+    const { error } = await supabase.from("addresses").insert({ ...form, user_id: user.id });
     if (error) setError(error.message); else { setForm(emptyForm); await load(); }
     setSaving(false);
   }
 
   async function remove(id: string) {
     const supabase = createClient();
-    const { error } = await supabase.from("customer_addresses").delete().eq("id", id);
+    const { error } = await supabase.from("addresses").delete().eq("id", id).eq("user_id", (await supabase.auth.getUser()).data.user?.id ?? "");
     if (error) setError(error.message); else await load();
   }
 
