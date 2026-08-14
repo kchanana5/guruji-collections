@@ -5,12 +5,11 @@ type Props = { compact?: boolean };
 export default function GjcLogo({ compact = false }: Props) {
   return (
     <Link href="/" aria-label="Guruji Collections home" className="inline-flex items-center gap-3">
-      <span className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#171717] text-[#c68a32] shadow-sm ring-1 ring-black/10">
-        <svg aria-hidden="true" viewBox="0 0 48 48" className="absolute inset-[6px] h-[calc(100%-12px)] w-[calc(100%-12px)]">
-          <path d="M8 18l5-6 5 5 6-9 6 9 5-5 5 6v4H8z" fill="currentColor" />
-          <path d="M10 24h28v3H10z" fill="currentColor" />
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[14px] bg-[#171717] shadow-sm ring-1 ring-black/10">
+        <svg aria-hidden="true" viewBox="0 0 48 48" className="h-8 w-8">
+          <path d="M10 12h18c5 0 8 3 8 7 0 2-.8 3.8-2.2 5.1 2.6 1.1 4.2 3.2 4.2 6.1 0 4.7-3.5 7.8-9 7.8H10V12Zm7 6v7h9c1.9 0 3-1.2 3-3.4 0-2.4-1.2-3.6-3.6-3.6H17Zm0 13v7h11c2.5 0 3.8-1.3 3.8-3.6 0-2.3-1.4-3.4-4.1-3.4H17Z" fill="#C99A52" />
+          <path d="M7 10h3v29H7z" fill="#fff" opacity=".95" />
         </svg>
-        <span className="relative mt-4 text-[10px] font-black tracking-[-0.08em] text-white">GJC</span>
       </span>
       {!compact && (
         <span className="leading-none">
