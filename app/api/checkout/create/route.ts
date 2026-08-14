@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     const { data: { user } } = await supabase.auth.getUser();
     const number = orderNumber();
     const shippingAddress = { email, recipientName: name, phone, line1, line2: typeof address?.line2 === "string" ? address.line2.trim() : "", city, state, postalCode, country: "IN" };
-    const { data: order, error: orderError } = await service.from("orders").insert({ order_number: number, user_id: user?.id ?? null, subtotal, discount_total: discount, grand_total: grandTotal, shipping_address: shippingAddress, notes: [couponCode ? `Coupon: ${couponCode}` : "", paymentMethod === "cod" ? "Payment: Cash on Delivery" : ""].filter(Boolean).join(" | ") || null }).select("id,order_number,grand_total").single();
+    const { data: order, error: orderError } = await service.from("orders").insert({ order_number: number, user_id: user?.id ?? null, subtotal, discount_total: discount, grand_total: grandTotal, coupon_code: couponCode || null, shipping_address: shippingAddress, notes: [couponCode ? `Coupon: ${couponCode}` : "", paymentMethod === "cod" ? "Payment: Cash on Delivery" : ""].filter(Boolean).join(" | ") || null }).select("id,order_number,grand_total").single();
     if (orderError) throw orderError;
     createdOrderId = order.id;
 
@@ -72,10 +72,9 @@ export async function POST(request: Request) {
       const { error: paymentError } = await service.from("payments").insert({ order_id: order.id, provider: "cod", status: "pending", amount: grandTotal, currency: "INR", raw_response: { method: "cash_on_delivery" } });
       if (paymentError) throw paymentError;
       if (couponCode) {
-        const { error: couponUsageError } = await service.rpc("increment_coupon_usage", { p_code: couponCode });
-        if (couponUsageError) throw couponUsageError;
+        const { data: couponRedeemed, error: couponUsageError } = await service.rpc("increment_coupon_usage", { p_code: couponCode });
+        if (couponUsageError || couponRedeemed === false) console.error("GJC COD coupon redemption could not be recorded", couponUsageError?.message || "coupon unavailable at confirmation");
       }
-      // COD orders are confirmed immediately so the admin can fulfill them through Shiprocket.
       const { error: confirmError } = await service.from("orders").update({ status: "confirmed", updated_at: new Date().toISOString() }).eq("id", order.id);
       if (confirmError) throw confirmError;
       return NextResponse.json({ orderId: order.id, orderNumber: number, paymentMethod: "cod", subtotal, discount, total: grandTotal });
@@ -93,10 +92,6 @@ export async function POST(request: Request) {
     const razorOrder = await razorResponse.json();
     const { error: paymentError } = await service.from("payments").insert({ order_id: order.id, provider: "razorpay", provider_order_id: razorOrder.id, status: "pending", amount: grandTotal, currency: "INR" });
     if (paymentError) throw paymentError;
-    if (couponCode) {
-      const { error: couponUsageError } = await service.rpc("increment_coupon_usage", { p_code: couponCode });
-      if (couponUsageError) throw couponUsageError;
-    }
     return NextResponse.json({ orderId: order.id, orderNumber: number, razorpayOrderId: razorOrder.id, keyId: razorpayKeyId, amount: Math.round(grandTotal * 100), currency: "INR", subtotal, discount, total: grandTotal });
   } catch (error) {
     if (service && createdOrderId) await service.from("orders").update({ status: "cancelled" }).eq("id", createdOrderId).in("status", ["pending", "confirmed"]);
