@@ -1,0 +1,9 @@
+import { createClient } from "@/lib/supabase/server";
+
+export default async function ProductReviews({ productId }: { productId: string }) {
+  const supabase = await createClient();
+  const { data: reviews } = await supabase.from("reviews").select("id,rating,title,body,created_at,profiles(full_name)").eq("product_id", productId).eq("is_published", true).order("created_at", { ascending: false }).limit(10);
+  if (!reviews?.length) return <section className="mt-10 border-t border-black/10 pt-8"><h2 className="text-xl font-bold">Customer reviews</h2><p className="mt-3 text-sm text-black/50">No reviews yet. Be the first to share your experience.</p></section>;
+  const average = reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
+  return <section className="mt-10 border-t border-black/10 pt-8"><div className="flex flex-wrap items-end justify-between gap-4"><div><h2 className="text-xl font-bold">Customer reviews</h2><p className="mt-2 text-sm text-black/55">{"★".repeat(Math.round(average))}{"☆".repeat(5 - Math.round(average))} · {average.toFixed(1)} from {reviews.length} review{reviews.length === 1 ? "" : "s"}</p></div></div><div className="mt-6 space-y-4">{reviews.map(review => <article key={review.id} className="rounded-2xl border bg-white p-5"><div className="flex items-center justify-between gap-4"><span className="font-semibold">{"★".repeat(review.rating)}{"☆".repeat(5-review.rating)}</span><span className="text-xs text-black/40">{new Date(review.created_at).toLocaleDateString("en-IN")}</span></div>{review.title && <h3 className="mt-3 font-semibold">{review.title}</h3>}{review.body && <p className="mt-2 text-sm leading-6 text-black/60">{review.body}</p>}<p className="mt-3 text-xs font-semibold text-black/45">{review.profiles?.full_name || "Verified customer"}</p></article>)}</div></section>;
+}
