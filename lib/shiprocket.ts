@@ -41,6 +41,7 @@ export async function createShiprocketShipment(input: {
   items: { sku: string; name: string; units: number; sellingPrice: number }[];
   subtotal: number;
   totalDiscount?: number;
+  paymentMethod?: "Prepaid" | "COD";
   weightKg: number;
   lengthCm: number;
   breadthCm: number;
@@ -74,7 +75,7 @@ export async function createShiprocketShipment(input: {
       shipping_country: input.country,
       shipping_pincode: input.pincode,
       order_items: input.items.map((i) => ({ sku: i.sku, name: i.name, units: i.units, selling_price: i.sellingPrice })),
-      payment_method: "Prepaid",
+      payment_method: input.paymentMethod || "Prepaid",
       total_discount: Number(input.totalDiscount || 0),
       sub_total: input.subtotal,
       length: input.lengthCm,
