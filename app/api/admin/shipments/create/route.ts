@@ -14,7 +14,7 @@ export async function POST(request: Request) {
     if (profile?.role !== "admin") return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const service = (await import("@supabase/supabase-js")).createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } });
-    const { data: order, error } = await service.from("orders").select("id,order_number,status,subtotal,discount_total,shipping_address,created_at,order_items(sku,product_name,quantity,unit_price,variant_id),payments(provider,status)").eq("id", orderId).single();
+    const { data: order, error } = await service.from("orders").select("id,order_number,status,subtotal,discount_total,shipping_address,created_at,order_items(sku,product_name,quantity,unit_price,variant_id),payments(provider,status,provider_payment_id,amount)").eq("id", orderId).single();
     if (error || !order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
     if (!["confirmed", "processing"].includes(order.status)) return NextResponse.json({ error: "Only confirmed or processing orders can be shipped" }, { status: 409 });
     const { data: existing } = await service.from("shipments").select("*").eq("order_id", orderId).maybeSingle();
@@ -25,7 +25,8 @@ export async function POST(request: Request) {
     const result = await createShiprocketShipment({
       orderId: order.order_number,
       orderDate: new Date(order.created_at).toISOString().slice(0, 10),
-      pickupLocation: process.env.SHIPROCKET_PICKUP_LOCATION || "Home",
+      // Let Shiprocket integration discover the active/default pickup location when no explicit one is configured.
+      pickupLocation: process.env.SHIPROCKET_PICKUP_LOCATION?.trim() || undefined,
       customerName: address.recipientName,
       phone: address.phone,
       email: address.email,
