@@ -35,8 +35,23 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Inventory confirmation failed" }, { status: 409 });
     }
 
-    const { error: paymentError } = await db.from("payments").update({ status: "paid", provider_payment_id: paymentId, raw_response: payload, updated_at: new Date().toISOString() }).eq("id", payment.id);
+    const { data: paidRows, error: paymentError } = await db
+      .from("payments")
+      .update({ status: "paid", provider_payment_id: paymentId, raw_response: payload, updated_at: new Date().toISOString() })
+      .eq("id", payment.id)
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
     if (paymentError) throw paymentError;
+
+    if (paidRows) {
+      const { data: order } = await db.from("orders").select("coupon_code").eq("id", payment.order_id).maybeSingle();
+      if (order?.coupon_code) {
+        const { data: couponRedeemed, error: couponUsageError } = await db.rpc("increment_coupon_usage", { p_code: order.coupon_code });
+        if (couponUsageError || couponRedeemed === false) console.error("GJC Razorpay webhook coupon redemption could not be recorded", couponUsageError?.message || "coupon unavailable at confirmation");
+      }
+    }
+
     await db.from("orders").update({ status: "confirmed", updated_at: new Date().toISOString() }).eq("id", payment.order_id);
     return NextResponse.json({ ok: true });
   } catch (error) {
