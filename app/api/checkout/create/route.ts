@@ -75,6 +75,9 @@ export async function POST(request: Request) {
         const { error: couponUsageError } = await service.rpc("increment_coupon_usage", { p_code: couponCode });
         if (couponUsageError) throw couponUsageError;
       }
+      // COD orders are confirmed immediately so the admin can fulfill them through Shiprocket.
+      const { error: confirmError } = await service.from("orders").update({ status: "confirmed", updated_at: new Date().toISOString() }).eq("id", order.id);
+      if (confirmError) throw confirmError;
       return NextResponse.json({ orderId: order.id, orderNumber: number, paymentMethod: "cod", subtotal, discount, total: grandTotal });
     }
 
