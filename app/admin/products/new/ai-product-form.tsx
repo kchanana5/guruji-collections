@@ -2,39 +2,139 @@
 
 import { useMemo, useState } from "react";
 
-type Variant = { size: string; color: string; sku: string; stock_quantity: number; price: string };
-type Draft = { name?: string; short_description?: string; description?: string; category?: string; tags?: string[]; seo_title?: string; seo_description?: string; material?: string; fit?: string; suggested_sizes?: string[]; suggested_colors?: string[]; care_instructions?: string; [key: string]: unknown };
+type Variant = {
+  size: string;
+  color: string;
+  sku: string;
+  stock_quantity: number;
+  price: string;
+  weight_grams: string;
+  package_length_cm: string;
+  package_breadth_cm: string;
+  package_height_cm: string;
+};
+
+type Draft = {
+  name?: string;
+  short_description?: string;
+  description?: string;
+  category?: string;
+  tags?: string[];
+  seo_title?: string;
+  seo_description?: string;
+  material?: string;
+  fit?: string;
+  suggested_sizes?: string[];
+  suggested_colors?: string[];
+  care_instructions?: string;
+  [key: string]: unknown;
+};
+
+const blankShipping = {
+  weight_grams: "",
+  package_length_cm: "30",
+  package_breadth_cm: "25",
+  package_height_cm: "5",
+};
 
 export default function AIProductForm() {
-  const [images, setImages] = useState<File[]>([]); const [previews, setPreviews] = useState<string[]>([]); const [price, setPrice] = useState(""); const [brand, setBrand] = useState("GJC"); const [loading, setLoading] = useState(false); const [action, setAction] = useState<"generate" | "draft" | "publish" | "">(""); const [message, setMessage] = useState(""); const [messageType, setMessageType] = useState<"info" | "success" | "error">("info"); const [result, setResult] = useState<Draft | null>(null); const [variants, setVariants] = useState<Variant[]>([]);
-  const canGenerate = Boolean(images[0] && Number(price) >= 0 && price !== ""); const tags = useMemo(() => Array.isArray(result?.tags) ? result.tags : [], [result]);
+  const [images, setImages] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
+  const [price, setPrice] = useState("");
+  const [brand, setBrand] = useState("GJC");
+  const [loading, setLoading] = useState(false);
+  const [action, setAction] = useState<"generate" | "draft" | "publish" | "">("");
+  const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<"info" | "success" | "error">("info");
+  const [result, setResult] = useState<Draft | null>(null);
+  const [variants, setVariants] = useState<Variant[]>([]);
+
+  const canGenerate = Boolean(images[0] && Number(price) >= 0 && price !== "");
+  const tags = useMemo(() => Array.isArray(result?.tags) ? result.tags : [], [result]);
   const setNotice = (text: string, type: "info" | "success" | "error" = "info") => { setMessage(text); setMessageType(type); };
 
   function onImagesChange(files?: FileList | null) {
-    if (!files?.length) return; const next = Array.from(files); if (next.length > 8) return setNotice("You can upload up to 8 product images.", "error"); if (next.some(file => !file.type.startsWith("image/"))) return setNotice("Please choose image files only.", "error"); if (next.some(file => file.size > 6 * 1024 * 1024)) return setNotice("Each image must be smaller than 6 MB.", "error");
-    setImages(next); setResult(null); setVariants([]); setNotice(""); Promise.all(next.map(file => new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || "")); reader.onerror = reject; reader.readAsDataURL(file); }))).then(setPreviews).catch(() => setNotice("Could not preview the selected images.", "error"));
+    if (!files?.length) return;
+    const next = Array.from(files);
+    if (next.length > 8) return setNotice("You can upload up to 8 product images.", "error");
+    if (next.some(file => !file.type.startsWith("image/"))) return setNotice("Please choose image files only.", "error");
+    if (next.some(file => file.size > 6 * 1024 * 1024)) return setNotice("Each image must be smaller than 6 MB.", "error");
+    setImages(next); setResult(null); setVariants([]); setNotice("");
+    Promise.all(next.map(file => new Promise<string>((resolve, reject) => {
+      const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || "")); reader.onerror = reject; reader.readAsDataURL(file);
+    }))).then(setPreviews).catch(() => setNotice("Could not preview the selected images.", "error"));
   }
-  function addVariant() { setVariants(current => [...current, { size: "", color: "", sku: `GJC-${Date.now()}-${current.length + 1}`, stock_quantity: 0, price }]); }
+
+  function newVariant(): Variant {
+    return { size: "", color: "", sku: `GJC-${Date.now()}-${variants.length + 1}`, stock_quantity: 0, price, ...blankShipping };
+  }
+  function addVariant() { setVariants(current => [...current, newVariant()]); }
   function updateVariant(index: number, field: keyof Variant, value: string | number) { setVariants(current => current.map((variant, i) => i === index ? { ...variant, [field]: value } : variant)); }
   function removeVariant(index: number) { setVariants(current => current.filter((_, i) => i !== index)); }
-  function seedSuggestedVariants() { const sizes = Array.isArray(result?.suggested_sizes) ? result.suggested_sizes : []; const colors = Array.isArray(result?.suggested_colors) ? result.suggested_colors : []; const firstColor = colors[0] || ""; const next = sizes.map((size, index) => ({ size, color: firstColor, sku: `GJC-${Date.now()}-${index + 1}`, stock_quantity: 0, price })); setVariants(next.length ? next : [{ size: "", color: firstColor, sku: `GJC-${Date.now()}-1`, stock_quantity: 0, price }]); setNotice("AI variant suggestions added. Set the stock for the combinations you actually sell.", "success"); }
+  function seedSuggestedVariants() {
+    const sizes = Array.isArray(result?.suggested_sizes) ? result.suggested_sizes : [];
+    const colors = Array.isArray(result?.suggested_colors) ? result.suggested_colors : [];
+    const firstColor = colors[0] || "";
+    const next = sizes.map((size, index) => ({ ...newVariant(), size, color: firstColor, sku: `GJC-${Date.now()}-${index + 1}` }));
+    setVariants(next.length ? next : [{ ...newVariant(), color: firstColor }]);
+    setNotice("AI variant suggestions added. Set stock and shipping details for the combinations you sell.", "success");
+  }
 
   async function generate() {
-    if (!images[0] || !canGenerate) return; setLoading(true); setAction("generate"); setNotice("");
-    try { const dataUrl = previews[0] || await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || "")); reader.onerror = reject; reader.readAsDataURL(images[0]); }); const response = await fetch("/api/admin/ai-product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: dataUrl, price: Number(price), brand }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Generation failed"); setResult(data); setNotice("AI draft generated. Review it before saving or publishing.", "success"); } catch (error) { setNotice(error instanceof Error ? error.message : "Generation failed.", "error"); } finally { setLoading(false); setAction(""); }
+    if (!images[0] || !canGenerate) return;
+    setLoading(true); setAction("generate"); setNotice("");
+    try {
+      const dataUrl = previews[0] || await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result || "")); reader.onerror = reject; reader.readAsDataURL(images[0]); });
+      const response = await fetch("/api/admin/ai-product", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image: dataUrl, price: Number(price), brand }) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Generation failed");
+      setResult(data); setNotice("AI draft generated. Review it before saving or publishing.", "success");
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Generation failed.", "error"); }
+    finally { setLoading(false); setAction(""); }
   }
 
   async function saveProduct(publish: boolean) {
-    if (!result) return; if (publish) { if (!images.length) return setNotice("At least one product image is required before publishing.", "error"); if (!variants.length) return setNotice("Add at least one size/colour variant before publishing.", "error"); const invalid = variants.find(v => !v.sku.trim() || !v.size.trim() || !v.color.trim() || v.stock_quantity < 0); if (invalid) return setNotice("Every variant needs a size, colour, SKU and valid stock quantity.", "error"); if (!variants.some(v => v.stock_quantity > 0)) return setNotice("Add stock to at least one variant before publishing.", "error"); }
-    const duplicateSkus = new Set<string>(); for (const variant of variants) { const sku = variant.sku.trim(); if (duplicateSkus.has(sku)) return setNotice(`Duplicate SKU: ${sku}`, "error"); duplicateSkus.add(sku); }
+    if (!result) return;
+    if (publish) {
+      if (!images.length) return setNotice("At least one product image is required before publishing.", "error");
+      if (!variants.length) return setNotice("Add at least one size/colour variant before publishing.", "error");
+      const invalid = variants.find(v => !v.sku.trim() || !v.size.trim() || !v.color.trim() || v.stock_quantity < 0 || !Number(v.weight_grams) || !Number(v.package_length_cm) || !Number(v.package_breadth_cm) || !Number(v.package_height_cm));
+      if (invalid) return setNotice("Every published variant needs stock plus packed weight and all three package dimensions.", "error");
+      if (!variants.some(v => v.stock_quantity > 0)) return setNotice("Add stock to at least one variant before publishing.", "error");
+    }
+    const duplicateSkus = new Set<string>();
+    for (const variant of variants) { const sku = variant.sku.trim(); if (duplicateSkus.has(sku)) return setNotice(`Duplicate SKU: ${sku}`, "error"); duplicateSkus.add(sku); }
     setLoading(true); setAction(publish ? "publish" : "draft"); setNotice("");
-    try { const form = new FormData(); form.set("draft", JSON.stringify({ ...result, variants })); form.set("price", String(Number(price))); form.set("brand", brand.trim() || "GJC"); form.set("publish", String(publish)); images.forEach(image => form.append("images", image)); const response = await fetch("/api/admin/products", { method: "POST", body: form }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not save product."); setNotice(publish ? `Product published with ${data.imageCount || images.length} images. Opening the product…` : "Product saved as a draft successfully.", "success"); window.setTimeout(() => { window.location.href = publish ? `/shop/${data.slug}` : "/admin"; }, 500); } catch (error) { setNotice(error instanceof Error ? error.message : "Could not save product.", "error"); setLoading(false); setAction(""); }
+    try {
+      const form = new FormData();
+      form.set("draft", JSON.stringify({ ...result, variants })); form.set("price", String(Number(price))); form.set("brand", brand.trim() || "GJC"); form.set("publish", String(publish));
+      images.forEach(image => form.append("images", image));
+      const response = await fetch("/api/admin/products", { method: "POST", body: form }); const data = await response.json(); if (!response.ok) throw new Error(data.error || "Could not save product.");
+      setNotice(publish ? `Product published with ${data.imageCount || images.length} images. Opening the product…` : "Product saved as a draft successfully.", "success");
+      window.setTimeout(() => { window.location.href = publish ? `/shop/${data.slug}` : "/admin"; }, 500);
+    } catch (error) { setNotice(error instanceof Error ? error.message : "Could not save product.", "error"); setLoading(false); setAction(""); }
   }
 
   return <div className="space-y-6">
-    <div className="rounded-2xl border border-dashed border-black/20 bg-[#faf9f6] p-5"><div className="grid gap-5 md:grid-cols-[260px_1fr] md:items-start"><div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-2">{previews.length ? previews.map((src, index) => <div key={`${src}-${index}`} className={`relative aspect-square overflow-hidden rounded-2xl bg-black/[0.04] ${index === 0 ? "ring-2 ring-[#8a6a35]" : ""}`}><img src={src} alt={`Product preview ${index + 1}`} className="h-full w-full object-cover" /><span className="absolute bottom-2 left-2 rounded-full bg-black/75 px-2 py-1 text-[10px] font-bold text-white">{index === 0 ? "MAIN" : `IMAGE ${index + 1}`}</span></div>) : <div className="col-span-2 flex aspect-square items-center justify-center rounded-2xl bg-black/[0.04] px-5 text-center text-sm text-black/40">Upload product photos</div>}</div><div><p className="text-sm font-bold">AI product assistant</p><p className="mt-1 text-xs leading-5 text-black/50">Upload up to 8 product photos. The first image becomes the main image; shoppers can switch between all images on the product page.</p><div className="mt-5 grid gap-4 sm:grid-cols-2"><label><span className="mb-2 block text-sm font-semibold">Product images</span><input type="file" accept="image/*" multiple onChange={e => onImagesChange(e.target.files)} className="block w-full text-sm" /><span className="mt-1 block text-xs text-black/40">Up to 8 images · max 6 MB each</span></label><label><span className="mb-2 block text-sm font-semibold">Price (INR)</span><input value={price} onChange={e => setPrice(e.target.value)} type="number" min="0" step="0.01" placeholder="1499" className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 outline-none focus:border-[#8a6a35]" /></label><label className="sm:col-span-2"><span className="mb-2 block text-sm font-semibold">Brand</span><input value={brand} onChange={e => setBrand(e.target.value)} className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 outline-none focus:border-[#8a6a35]" /></label></div><button type="button" onClick={generate} disabled={!canGenerate || loading} className="mt-5 rounded-xl bg-[#171717] px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{action === "generate" ? "Generating…" : "Generate with AI"}</button></div></div></div>
+    <div className="rounded-2xl border border-dashed border-black/20 bg-[#faf9f6] p-5">
+      <div className="grid gap-5 md:grid-cols-[260px_1fr] md:items-start">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-2">{previews.length ? previews.map((src, index) => <div key={`${src}-${index}`} className={`relative aspect-square overflow-hidden rounded-2xl bg-black/[0.04] ${index === 0 ? "ring-2 ring-[#8a6a35]" : ""}`}><img src={src} alt={`Product preview ${index + 1}`} className="h-full w-full object-cover" /><span className="absolute bottom-2 left-2 rounded-full bg-black/75 px-2 py-1 text-[10px] font-bold text-white">{index === 0 ? "MAIN" : `IMAGE ${index + 1}`}</span></div>) : <div className="col-span-2 flex aspect-square items-center justify-center rounded-2xl bg-black/[0.04] px-5 text-center text-sm text-black/40">Upload product photos</div>}</div>
+        <div><p className="text-sm font-bold">AI product assistant</p><p className="mt-1 text-xs leading-5 text-black/50">Upload up to 8 product photos. The first image becomes the main image; shoppers can switch between all images.</p><div className="mt-5 grid gap-4 sm:grid-cols-2"><label><span className="mb-2 block text-sm font-semibold">Product images</span><input type="file" accept="image/*" multiple onChange={e => onImagesChange(e.target.files)} className="block w-full text-sm" /><span className="mt-1 block text-xs text-black/40">Up to 8 images · max 6 MB each</span></label><label><span className="mb-2 block text-sm font-semibold">Price (INR)</span><input value={price} onChange={e => setPrice(e.target.value)} type="number" min="0" step="0.01" placeholder="1499" className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 outline-none focus:border-[#8a6a35]" /></label><label className="sm:col-span-2"><span className="mb-2 block text-sm font-semibold">Brand</span><input value={brand} onChange={e => setBrand(e.target.value)} className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 outline-none focus:border-[#8a6a35]" /></label></div><button type="button" onClick={generate} disabled={!canGenerate || loading} className="mt-5 rounded-xl bg-[#171717] px-5 py-3 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40">{action === "generate" ? "Generating…" : "Generate with AI"}</button></div>
+      </div>
+    </div>
+
     {message && <p className={`rounded-xl px-4 py-3 text-sm ${messageType === "error" ? "bg-red-50 text-red-700" : messageType === "success" ? "bg-green-50 text-green-700" : "bg-[#f7f3ec] text-black/65"}`}>{message}</p>}
-    {result && <section className="rounded-2xl border border-black/10 bg-white p-6"><div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.25em] text-[#8a6a35]">AI DRAFT</p><h2 className="mt-1 text-2xl font-black">Review before saving</h2></div><span className="rounded-full bg-[#f7f3ec] px-3 py-1 text-xs font-bold">{images.length} product images</span></div><div className="mt-6 grid gap-5 sm:grid-cols-2"><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Title</p><p className="mt-1 font-bold">{result.name}</p></div><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Category</p><p className="mt-1">{result.category || "—"}</p></div><div className="sm:col-span-2"><p className="text-xs font-bold uppercase tracking-wider text-black/40">Description</p><p className="mt-1 text-sm leading-6 text-black/65">{result.description}</p></div><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Material</p><p className="mt-1">{result.material || "Not confidently identified"}</p></div><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Fit</p><p className="mt-1">{result.fit || "—"}</p></div><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Suggested sizes</p><p className="mt-1">{Array.isArray(result.suggested_sizes) ? result.suggested_sizes.join(", ") : "—"}</p></div><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Suggested colours</p><p className="mt-1">{Array.isArray(result.suggested_colors) ? result.suggested_colors.join(", ") : "—"}</p></div><div className="sm:col-span-2"><p className="text-xs font-bold uppercase tracking-wider text-black/40">Tags</p><div className="mt-2 flex flex-wrap gap-2">{tags.map(tag => <span key={tag} className="rounded-full bg-[#f7f3ec] px-3 py-1 text-xs font-semibold">{tag}</span>)}</div></div></div>
-      <div className="mt-8 border-t border-black/10 pt-7"><div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.25em] text-[#8a6a35]">OWNER REVIEW</p><h3 className="mt-1 text-xl font-black">Size, colour & inventory</h3><p className="mt-1 text-sm text-black/50">Add the combinations you actually sell. Publishing requires at least one in-stock variant.</p></div><div className="flex gap-2"><button type="button" onClick={seedSuggestedVariants} disabled={loading} className="rounded-xl border border-black/10 px-4 py-2.5 text-xs font-bold">Use AI suggestions</button><button type="button" onClick={addVariant} disabled={loading} className="rounded-xl bg-[#171717] px-4 py-2.5 text-xs font-bold text-white">+ Add variant</button></div></div>{variants.length === 0 ? <div className="mt-5 rounded-xl bg-[#faf9f6] px-4 py-6 text-center text-sm text-black/45">No variants added yet.</div> : <div className="mt-5 space-y-3">{variants.map((variant, index) => <div key={`${variant.sku}-${index}`} className="rounded-xl border border-black/10 bg-[#faf9f6] p-4"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><label><span className="mb-1 block text-xs font-semibold text-black/50">Size</span><input value={variant.size} onChange={e => updateVariant(index, "size", e.target.value)} placeholder="M" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Colour</span><input value={variant.color} onChange={e => updateVariant(index, "color", e.target.value)} placeholder="Black" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">SKU</span><input value={variant.sku} onChange={e => updateVariant(index, "sku", e.target.value)} className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Stock</span><input value={variant.stock_quantity} onChange={e => updateVariant(index, "stock_quantity", Math.max(0, Number(e.target.value)))} type="number" min="0" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Variant price</span><input value={variant.price} onChange={e => updateVariant(index, "price", e.target.value)} type="number" min="0" step="0.01" placeholder={price || "1499"} className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label></div><button type="button" onClick={() => removeVariant(index)} disabled={loading} className="mt-3 text-xs font-semibold text-red-600 hover:underline">Remove variant</button></div>)}</div>}</div><div className="mt-7 grid gap-3 sm:grid-cols-2"><button type="button" onClick={() => saveProduct(false)} disabled={loading} className="rounded-xl border border-black/15 bg-white px-5 py-3.5 text-sm font-bold">{action === "draft" ? "Saving draft…" : "Save as draft"}</button><button type="button" onClick={() => saveProduct(true)} disabled={loading} className="rounded-xl bg-[#171717] px-5 py-3.5 text-sm font-bold text-white">{action === "publish" ? "Publishing…" : "Publish product"}</button></div></section>}
+
+    {result && <section className="rounded-2xl border border-black/10 bg-white p-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.25em] text-[#8a6a35]">AI DRAFT</p><h2 className="mt-1 text-2xl font-black">Review before saving</h2></div><span className="rounded-full bg-[#f7f3ec] px-3 py-1 text-xs font-bold">{images.length} product images</span></div>
+      <div className="mt-6 grid gap-5 sm:grid-cols-2"><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Title</p><p className="mt-1 font-bold">{result.name}</p></div><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Category</p><p className="mt-1">{result.category || "—"}</p></div><div className="sm:col-span-2"><p className="text-xs font-bold uppercase tracking-wider text-black/40">Description</p><p className="mt-1 text-sm leading-6 text-black/65">{result.description}</p></div><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Material</p><p className="mt-1">{result.material || "Not confidently identified"}</p></div><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Fit</p><p className="mt-1">{result.fit || "—"}</p></div><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Suggested sizes</p><p className="mt-1">{Array.isArray(result.suggested_sizes) ? result.suggested_sizes.join(", ") : "—"}</p></div><div><p className="text-xs font-bold uppercase tracking-wider text-black/40">Suggested colours</p><p className="mt-1">{Array.isArray(result.suggested_colors) ? result.suggested_colors.join(", ") : "—"}</p></div><div className="sm:col-span-2"><p className="text-xs font-bold uppercase tracking-wider text-black/40">Tags</p><div className="mt-2 flex flex-wrap gap-2">{tags.map(tag => <span key={tag} className="rounded-full bg-[#f7f3ec] px-3 py-1 text-xs font-semibold">{tag}</span>)}</div></div></div>
+
+      <div className="mt-8 border-t border-black/10 pt-7">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.25em] text-[#8a6a35]">OWNER REVIEW</p><h3 className="mt-1 text-xl font-black">Size, colour, inventory & shipping</h3><p className="mt-1 text-sm text-black/50">Enter the <b>packed</b> weight and package dimensions. These are sent to Shiprocket for courier/rate selection.</p></div><div className="flex gap-2"><button type="button" onClick={seedSuggestedVariants} disabled={loading} className="rounded-xl border border-black/10 px-4 py-2.5 text-xs font-bold">Use AI suggestions</button><button type="button" onClick={addVariant} disabled={loading} className="rounded-xl bg-[#171717] px-4 py-2.5 text-xs font-bold text-white">+ Add variant</button></div></div>
+        {variants.length === 0 ? <div className="mt-5 rounded-xl bg-[#faf9f6] px-4 py-6 text-center text-sm text-black/45">No variants added yet.</div> : <div className="mt-5 space-y-3">{variants.map((variant, index) => <div key={`${variant.sku}-${index}`} className="rounded-xl border border-black/10 bg-[#faf9f6] p-4"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><label><span className="mb-1 block text-xs font-semibold text-black/50">Size</span><input value={variant.size} onChange={e => updateVariant(index, "size", e.target.value)} placeholder="M" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Colour</span><input value={variant.color} onChange={e => updateVariant(index, "color", e.target.value)} placeholder="Black" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">SKU</span><input value={variant.sku} onChange={e => updateVariant(index, "sku", e.target.value)} className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Stock</span><input value={variant.stock_quantity} onChange={e => updateVariant(index, "stock_quantity", Math.max(0, Number(e.target.value)))} type="number" min="0" className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Variant price</span><input value={variant.price} onChange={e => updateVariant(index, "price", e.target.value)} type="number" min="0" step="0.01" placeholder={price || "1499"} className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-sm" /></label></div>
+          <div className="mt-4 rounded-xl border border-[#8a6a35]/15 bg-white p-4"><p className="text-xs font-bold uppercase tracking-[0.18em] text-[#8a6a35]">Packed shipment data</p><div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><label><span className="mb-1 block text-xs font-semibold text-black/50">Weight (grams)</span><input value={variant.weight_grams} onChange={e => updateVariant(index, "weight_grams", e.target.value)} type="number" min="1" step="1" placeholder="350" className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Length (cm)</span><input value={variant.package_length_cm} onChange={e => updateVariant(index, "package_length_cm", e.target.value)} type="number" min="1" step="0.1" className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Breadth (cm)</span><input value={variant.package_breadth_cm} onChange={e => updateVariant(index, "package_breadth_cm", e.target.value)} type="number" min="1" step="0.1" className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm" /></label><label><span className="mb-1 block text-xs font-semibold text-black/50">Height (cm)</span><input value={variant.package_height_cm} onChange={e => updateVariant(index, "package_height_cm", e.target.value)} type="number" min="1" step="0.1" className="w-full rounded-lg border border-black/10 px-3 py-2 text-sm" /></label></div><p className="mt-2 text-[11px] text-black/40">Example: a folded shirt in a polybag may be around 350g and 30 × 25 × 5 cm. Use your actual packed measurements.</p></div>
+          <button type="button" onClick={() => removeVariant(index)} disabled={loading} className="mt-3 text-xs font-semibold text-red-600 hover:underline">Remove variant</button></div>)}</div>}
+      </div>
+      <div className="mt-7 grid gap-3 sm:grid-cols-2"><button type="button" onClick={() => saveProduct(false)} disabled={loading} className="rounded-xl border border-black/15 bg-white px-5 py-3.5 text-sm font-bold">{action === "draft" ? "Saving draft…" : "Save as draft"}</button><button type="button" onClick={() => saveProduct(true)} disabled={loading} className="rounded-xl bg-[#171717] px-5 py-3.5 text-sm font-bold text-white">{action === "publish" ? "Publishing…" : "Publish product"}</button></div>
+    </section>}
   </div>;
 }
