@@ -1,11 +1,19 @@
 -- Shipping data used by Shiprocket when creating a shipment.
 -- Values describe the normally packed item, not the loose garment.
 alter table public.product_variants
+  add column if not exists weight_grams integer,
   add column if not exists package_length_cm numeric(8,2),
   add column if not exists package_breadth_cm numeric(8,2),
   add column if not exists package_height_cm numeric(8,2);
 
 alter table public.product_variants
+  drop constraint if exists variant_weight_grams_check,
+  drop constraint if exists variant_package_length_check,
+  drop constraint if exists variant_package_breadth_check,
+  drop constraint if exists variant_package_height_check;
+
+alter table public.product_variants
+  add constraint variant_weight_grams_check check (weight_grams is null or weight_grams > 0),
   add constraint variant_package_length_check check (package_length_cm is null or package_length_cm > 0),
   add constraint variant_package_breadth_check check (package_breadth_cm is null or package_breadth_cm > 0),
   add constraint variant_package_height_check check (package_height_cm is null or package_height_cm > 0);
