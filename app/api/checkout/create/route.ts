@@ -48,18 +48,41 @@ export async function POST(request: Request) {
     }
 
     service = (await import("@supabase/supabase-js")).createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, adminKey, { auth: { persistSession: false } });
+
+    let shippingCharge = 69;
+    let freeShippingThreshold = 499;
+    const { data: shippingSettings } = await service.from("store_settings").select("shipping_charge,free_shipping_threshold").eq("id", true).maybeSingle();
+    if (shippingSettings) {
+      shippingCharge = Math.max(0, Number(shippingSettings.shipping_charge));
+      freeShippingThreshold = Math.max(0, Number(shippingSettings.free_shipping_threshold));
+    }
+    const shippingTotal = subtotal < freeShippingThreshold ? shippingCharge : 0;
+
     let discount = 0;
     if (couponCode) {
+      // Coupon validation is intentionally based on merchandise subtotal only.
+      // Shipping is calculated separately and can never be discounted by a coupon.
       const { data: couponResult, error: couponError } = await service.rpc("validate_coupon", { p_code: couponCode, p_order_value: subtotal });
       const row: any = Array.isArray(couponResult) ? couponResult[0] : couponResult;
       if (couponError || !row?.valid) return NextResponse.json({ error: row?.message || "This coupon is invalid or unavailable." }, { status: 400 });
       discount = Math.min(Number(row.discount || 0), subtotal);
     }
-    const grandTotal = Math.max(0, subtotal - discount);
+
+    const grandTotal = Math.max(0, subtotal - discount + shippingTotal);
     const { data: { user } } = await supabase.auth.getUser();
     const number = orderNumber();
     const shippingAddress = { email, recipientName: name, phone, line1, line2: typeof address?.line2 === "string" ? address.line2.trim() : "", city, state, postalCode, country: "IN" };
-    const { data: order, error: orderError } = await service.from("orders").insert({ order_number: number, user_id: user?.id ?? null, subtotal, discount_total: discount, grand_total: grandTotal, coupon_code: couponCode || null, shipping_address: shippingAddress, notes: [couponCode ? `Coupon: ${couponCode}` : "", paymentMethod === "cod" ? "Payment: Cash on Delivery" : ""].filter(Boolean).join(" | ") || null }).select("id,order_number,grand_total").single();
+    const { data: order, error: orderError } = await service.from("orders").insert({
+      order_number: number,
+      user_id: user?.id ?? null,
+      subtotal,
+      discount_total: discount,
+      shipping_total: shippingTotal,
+      grand_total: grandTotal,
+      coupon_code: couponCode || null,
+      shipping_address: shippingAddress,
+      notes: [couponCode ? `Coupon: ${couponCode}` : "", paymentMethod === "cod" ? "Payment: Cash on Delivery" : "", shippingTotal > 0 ? `Shipping: ₹${shippingTotal}` : "Free shipping"].filter(Boolean).join(" | ") || null,
+    }).select("id,order_number,grand_total,shipping_total").single();
     if (orderError) throw orderError;
     createdOrderId = order.id;
 
@@ -77,12 +100,12 @@ export async function POST(request: Request) {
       }
       const { error: confirmError } = await service.from("orders").update({ status: "confirmed", updated_at: new Date().toISOString() }).eq("id", order.id);
       if (confirmError) throw confirmError;
-      return NextResponse.json({ orderId: order.id, orderNumber: number, paymentMethod: "cod", subtotal, discount, total: grandTotal });
+      return NextResponse.json({ orderId: order.id, orderNumber: number, paymentMethod: "cod", subtotal, discount, shipping: shippingTotal, total: grandTotal });
     }
 
     const razorpayKeyId = process.env.RAZORPAY_KEY_ID!;
     const razorpaySecret = process.env.RAZORPAY_KEY_SECRET!;
-    const razorResponse = await fetch("https://api.razorpay.com/v1/orders", { method: "POST", headers: { Authorization: `Basic ${Buffer.from(`${razorpayKeyId}:${razorpaySecret}`).toString("base64")}`, "Content-Type": "application/json" }, body: JSON.stringify({ amount: Math.round(grandTotal * 100), currency: "INR", receipt: number, notes: { gjc_order_id: order.id, coupon: couponCode || undefined, discount: discount.toFixed(2) } }) });
+    const razorResponse = await fetch("https://api.razorpay.com/v1/orders", { method: "POST", headers: { Authorization: `Basic ${Buffer.from(`${razorpayKeyId}:${razorpaySecret}`).toString("base64")}`, "Content-Type": "application/json" }, body: JSON.stringify({ amount: Math.round(grandTotal * 100), currency: "INR", receipt: number, notes: { gjc_order_id: order.id, coupon: couponCode || undefined, discount: discount.toFixed(2), shipping: shippingTotal.toFixed(2) } }) });
     if (!razorResponse.ok) {
       const raw = await razorResponse.text(); let details: any = null; try { details = JSON.parse(raw); } catch {}
       await service.from("orders").update({ status: "cancelled" }).eq("id", order.id);
@@ -92,7 +115,7 @@ export async function POST(request: Request) {
     const razorOrder = await razorResponse.json();
     const { error: paymentError } = await service.from("payments").insert({ order_id: order.id, provider: "razorpay", provider_order_id: razorOrder.id, status: "pending", amount: grandTotal, currency: "INR" });
     if (paymentError) throw paymentError;
-    return NextResponse.json({ orderId: order.id, orderNumber: number, razorpayOrderId: razorOrder.id, keyId: razorpayKeyId, amount: Math.round(grandTotal * 100), currency: "INR", subtotal, discount, total: grandTotal });
+    return NextResponse.json({ orderId: order.id, orderNumber: number, razorpayOrderId: razorOrder.id, keyId: razorpayKeyId, amount: Math.round(grandTotal * 100), currency: "INR", subtotal, discount, shipping: shippingTotal, total: grandTotal });
   } catch (error) {
     if (service && createdOrderId) await service.from("orders").update({ status: "cancelled" }).eq("id", createdOrderId).in("status", ["pending", "confirmed"]);
     console.error("GJC checkout create", error);
