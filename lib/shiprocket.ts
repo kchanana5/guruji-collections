@@ -28,12 +28,27 @@ async function getPickupLocation(bearer: string) {
 function splitCustomerName(fullName: string) {
   const parts = fullName.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) return { firstName: "Customer", lastName: "Customer" };
-  return {
-    firstName: parts[0],
-    // Shiprocket requires a non-empty last name. For a single-name customer,
-    // use a neutral fallback rather than sending an invalid request.
-    lastName: parts.slice(1).join(" ") || "Customer",
-  };
+  return { firstName: parts[0], lastName: parts.slice(1).join(" ") || "Customer" };
+}
+
+async function assignAwb(bearer: string, shipmentId: number) {
+  const awb = await fetch(`${API}/courier/assign/awb`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${bearer}` },
+    body: JSON.stringify({ shipment_id: shipmentId }),
+  });
+  const raw = await awb.text();
+  let data: any = {};
+  try { data = raw ? JSON.parse(raw) : {}; } catch { data = { raw }; }
+  const shipment = data.response?.data?.shipment || data.response?.shipment || data.shipment || {};
+  const awbCode = shipment.awb_code || data.response?.data?.awb_code || null;
+  const courierName = shipment.courier_name || data.response?.data?.courier_name || null;
+  return { ok: awb.ok, awbCode: awbCode ? String(awbCode) : null, courierName: courierName ? String(courierName) : null, raw: data };
+}
+
+export async function assignExistingShiprocketAwb(shipmentId: number) {
+  const bearer = await token();
+  return assignAwb(bearer, shipmentId);
 }
 
 export async function createShiprocketShipment(input: {
@@ -111,12 +126,8 @@ export async function createShiprocketShipment(input: {
       if (validation && typeof validation === "object") {
         const fields = Object.entries(validation).map(([field, value]) => `${field}: ${Array.isArray(value) ? value.join(", ") : String(value)}`);
         if (fields.length) message += ` — ${fields.join("; ")}`;
-      } else if (details?.message) {
-        message += ` — ${details.message}`;
-      }
-    } catch {
-      if (raw) message += ` — ${raw.slice(0, 300)}`;
-    }
+      } else if (details?.message) message += ` — ${details.message}`;
+    } catch { if (raw) message += ` — ${raw.slice(0, 300)}`; }
     throw new Error(message);
   }
 
@@ -125,22 +136,12 @@ export async function createShiprocketShipment(input: {
   const shiprocketOrderId = String(created.order_id || created.order?.order_id || "");
   if (!shipmentId) throw new Error("Shiprocket did not return a shipment id");
 
-  const awb = await fetch(`${API}/courier/assign/awb`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${bearer}` },
-    body: JSON.stringify({ shipment_id: shipmentId }),
-  });
-  if (!awb.ok) {
-    const raw = await awb.text();
-    throw new Error(`Shiprocket AWB assignment failed: ${awb.status}${raw ? ` — ${raw.slice(0, 300)}` : ""}`);
-  }
-  const awbData = await awb.json();
-  const shipment = awbData.response?.data?.shipment || awbData.response?.shipment || awbData.shipment || {};
+  const awbResult = await assignAwb(bearer, shipmentId);
   return {
     shiprocketOrderId,
     shipmentId,
-    awbCode: shipment.awb_code || awbData.response?.data?.awb_code || null,
-    courierName: shipment.courier_name || awbData.response?.data?.courier_name || null,
-    raw: { create: created, awb: awbData },
+    awbCode: awbResult.awbCode,
+    courierName: awbResult.courierName,
+    raw: { create: created, awb: awbResult.raw },
   };
 }
