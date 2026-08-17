@@ -10,6 +10,33 @@ function shiprocketMessage(raw: any) {
     || "Shiprocket created the shipment but has not assigned an AWB yet.";
 }
 
+function shipmentDimensions(items: any[]) {
+  const fallback = {
+    weightKg: Math.max(0.5, Number(process.env.SHIPROCKET_DEFAULT_WEIGHT_KG || 0.5)),
+    lengthCm: Number(process.env.SHIPROCKET_DEFAULT_LENGTH_CM || 20),
+    breadthCm: Number(process.env.SHIPROCKET_DEFAULT_BREADTH_CM || 15),
+    heightCm: Number(process.env.SHIPROCKET_DEFAULT_HEIGHT_CM || 10),
+    usedFallback: false,
+  };
+
+  if (!items.length || items.some((item) => !item.product_variants?.weight_grams || !item.product_variants?.package_length_cm || !item.product_variants?.package_breadth_cm || !item.product_variants?.package_height_cm)) {
+    return { ...fallback, usedFallback: true };
+  }
+
+  const weightGrams = items.reduce((sum, item) => sum + Number(item.product_variants.weight_grams) * Number(item.quantity || 1), 0);
+  const lengthCm = Math.max(...items.map((item) => Number(item.product_variants.package_length_cm)));
+  const breadthCm = Math.max(...items.map((item) => Number(item.product_variants.package_breadth_cm)));
+  const heightCm = items.reduce((sum, item) => sum + Number(item.product_variants.package_height_cm) * Number(item.quantity || 1), 0);
+
+  return {
+    weightKg: Math.max(0.5, Number((weightGrams / 1000).toFixed(3))),
+    lengthCm: Number(lengthCm.toFixed(2)),
+    breadthCm: Number(breadthCm.toFixed(2)),
+    heightCm: Number(Math.max(1, heightCm).toFixed(2)),
+    usedFallback: false,
+  };
+}
+
 export async function POST(request: Request) {
   try {
     const { orderId } = await request.json();
@@ -29,49 +56,30 @@ export async function POST(request: Request) {
 
     const { data: order, error } = await service
       .from("orders")
-      .select("id,order_number,status,subtotal,discount_total,shipping_address,created_at,order_items(sku,product_name,quantity,unit_price,variant_id),payments(provider,status,provider_payment_id,amount)")
+      .select("id,order_number,status,subtotal,discount_total,shipping_address,created_at,order_items(sku,product_name,quantity,unit_price,variant_id,product_variants(weight_grams,package_length_cm,package_breadth_cm,package_height_cm)),payments(provider,status,provider_payment_id,amount)")
       .eq("id", orderId)
       .single();
     if (error || !order) return NextResponse.json({ error: "Order not found" }, { status: 404 });
-    if (!["confirmed", "processing"].includes(order.status)) {
-      return NextResponse.json({ error: "Only confirmed or processing orders can be shipped" }, { status: 409 });
-    }
+    if (!["confirmed", "processing"].includes(order.status)) return NextResponse.json({ error: "Only confirmed or processing orders can be shipped" }, { status: 409 });
 
     const { data: existing } = await service.from("shipments").select("*").eq("order_id", orderId).maybeSingle();
     if (existing?.awb_code) return NextResponse.json({ shipment: existing, alreadyExists: true });
 
-    // If Shiprocket already created the shipment but AWB assignment failed,
-    // retry AWB assignment on the existing Shiprocket shipment instead of creating a duplicate order.
     if (existing?.provider === "shiprocket" && existing?.external_shipment_id) {
       const awbResult = await assignExistingShiprocketAwb(Number(existing.external_shipment_id));
       if (awbResult.awbCode) {
-        const { data: shipment, error: shipmentError } = await service.from("shipments").update({
-          awb_code: awbResult.awbCode,
-          courier_name: awbResult.courierName,
-          tracking_url: `https://shiprocket.co/tracking/${encodeURIComponent(awbResult.awbCode)}`,
-          status: "AWB_ASSIGNED",
-          raw_response: awbResult.raw,
-          updated_at: new Date().toISOString(),
-        }).eq("id", existing.id).select().single();
+        const { data: shipment, error: shipmentError } = await service.from("shipments").update({ awb_code: awbResult.awbCode, courier_name: awbResult.courierName, tracking_url: `https://shiprocket.co/tracking/${encodeURIComponent(awbResult.awbCode)}`, status: "AWB_ASSIGNED", raw_response: awbResult.raw, updated_at: new Date().toISOString() }).eq("id", existing.id).select().single();
         if (shipmentError) throw shipmentError;
         await service.from("orders").update({ status: "shipped", updated_at: new Date().toISOString() }).eq("id", order.id);
         return NextResponse.json({ shipment, awbAssigned: true });
       }
-
-      await service.from("shipments").update({
-        status: "AWB_PENDING",
-        raw_response: awbResult.raw,
-        updated_at: new Date().toISOString(),
-      }).eq("id", existing.id);
-      return NextResponse.json({
-        error: shiprocketMessage({ awb: awbResult.raw }),
-        shipment: { ...existing, status: "AWB_PENDING" },
-        awbPending: true,
-      }, { status: 409 });
+      await service.from("shipments").update({ status: "AWB_PENDING", raw_response: awbResult.raw, updated_at: new Date().toISOString() }).eq("id", existing.id);
+      return NextResponse.json({ error: shiprocketMessage({ awb: awbResult.raw }), shipment: { ...existing, status: "AWB_PENDING" }, awbPending: true }, { status: 409 });
     }
 
     const address = order.shipping_address as any;
     const cod = (order.payments || []).some((p: any) => p.provider === "cod");
+    const shipping = shipmentDimensions(order.order_items || []);
     const result = await createShiprocketShipment({
       orderId: order.order_number,
       orderDate: new Date(order.created_at).toISOString().slice(0, 10),
@@ -89,10 +97,10 @@ export async function POST(request: Request) {
       subtotal: Number(order.subtotal),
       totalDiscount: Number(order.discount_total || 0),
       paymentMethod: cod ? "COD" : "Prepaid",
-      weightKg: Number(process.env.SHIPROCKET_DEFAULT_WEIGHT_KG || 0.5),
-      lengthCm: Number(process.env.SHIPROCKET_DEFAULT_LENGTH_CM || 20),
-      breadthCm: Number(process.env.SHIPROCKET_DEFAULT_BREADTH_CM || 15),
-      heightCm: Number(process.env.SHIPROCKET_DEFAULT_HEIGHT_CM || 10),
+      weightKg: shipping.weightKg,
+      lengthCm: shipping.lengthCm,
+      breadthCm: shipping.breadthCm,
+      heightCm: shipping.heightCm,
     });
 
     const awbAssigned = Boolean(result.awbCode);
@@ -104,21 +112,15 @@ export async function POST(request: Request) {
       courier_name: result.courierName,
       tracking_url: result.awbCode ? `https://shiprocket.co/tracking/${encodeURIComponent(result.awbCode)}` : null,
       status: awbAssigned ? "AWB_ASSIGNED" : "AWB_PENDING",
-      raw_response: result.raw,
+      raw_response: { ...result.raw, gjc_shipping: shipping },
       updated_at: new Date().toISOString(),
     }, { onConflict: "order_id" }).select().single();
     if (shipmentError) throw shipmentError;
 
-    if (!awbAssigned) {
-      return NextResponse.json({
-        error: shiprocketMessage(result.raw),
-        shipment,
-        awbPending: true,
-      }, { status: 409 });
-    }
+    if (!awbAssigned) return NextResponse.json({ error: shiprocketMessage(result.raw), shipment, awbPending: true, usedShippingFallback: shipping.usedFallback }, { status: 409 });
 
     await service.from("orders").update({ status: "shipped", updated_at: new Date().toISOString() }).eq("id", order.id);
-    return NextResponse.json({ shipment, awbAssigned: true });
+    return NextResponse.json({ shipment, awbAssigned: true, usedShippingFallback: shipping.usedFallback });
   } catch (error) {
     console.error("GJC Shiprocket create", error);
     return NextResponse.json({ error: error instanceof Error ? error.message : "Unable to create shipment" }, { status: 502 });
