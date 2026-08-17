@@ -9,6 +9,12 @@ function safeFileName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9.]+/g, "-").replace(/^-+|-+$/g, "product-image").slice(0, 100);
 }
 
+function optionalPositiveNumber(value: unknown) {
+  if (value === "" || value == null) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -46,7 +52,14 @@ export async function POST(request: Request) {
     const color = String(variant?.color || "").trim();
     const stock = Number(variant?.stock_quantity);
     const variantPrice = variant?.price === "" || variant?.price == null ? null : Number(variant.price);
+    const weightGrams = optionalPositiveNumber(variant?.weight_grams);
+    const lengthCm = optionalPositiveNumber(variant?.package_length_cm);
+    const breadthCm = optionalPositiveNumber(variant?.package_breadth_cm);
+    const heightCm = optionalPositiveNumber(variant?.package_height_cm);
+    const shippingFieldsProvided = [variant?.weight_grams, variant?.package_length_cm, variant?.package_breadth_cm, variant?.package_height_cm].some(value => value !== "" && value != null);
+    const shippingFieldsValid = !shippingFieldsProvided || (weightGrams !== null && lengthCm !== null && breadthCm !== null && heightCm !== null);
     if (!sku || !size || !color || !Number.isInteger(stock) || stock < 0 || (variantPrice !== null && (!Number.isFinite(variantPrice) || variantPrice < 0))) return NextResponse.json({ error: "Every variant needs a size, colour, SKU and valid stock/price." }, { status: 400 });
+    if (!shippingFieldsValid) return NextResponse.json({ error: `Shipping details for ${sku} must include positive weight, length, breadth and height.` }, { status: 400 });
     if (seenSkus.has(sku)) return NextResponse.json({ error: `Duplicate SKU: ${sku}` }, { status: 400 });
     seenSkus.add(sku);
   }
@@ -73,6 +86,10 @@ export async function POST(request: Request) {
         product_id: product.id, sku: String(variant.sku).trim(), size: String(variant.size).trim(),
         color: String(variant.color).trim(), price: variant.price === "" || variant.price == null ? null : Number(variant.price),
         stock_quantity: Number(variant.stock_quantity), is_active: true,
+        weight_grams: optionalPositiveNumber(variant.weight_grams),
+        package_length_cm: optionalPositiveNumber(variant.package_length_cm),
+        package_breadth_cm: optionalPositiveNumber(variant.package_breadth_cm),
+        package_height_cm: optionalPositiveNumber(variant.package_height_cm),
       })));
       if (variantError) throw new Error(variantError.message);
     }
